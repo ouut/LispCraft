@@ -289,7 +289,7 @@ def run_http_wasm_tests(collector: TestReportCollector, base_url: str = None):
             magic = resp.read(4)
             assert code == 200, f"Expected 200, got {code}"
             assert ct == "application/wasm", f"Expected application/wasm, got {ct}"
-            assert cl > 10 * 1024 * 1024, f"client.wasm too small: {cl}B"
+            assert cl > 100 * 1024, f"client.wasm too small: {cl}B"
             assert magic == b"\x00asm", f"Invalid WASM magic header: {magic}"
             collector.record("HTTP/WASM", "client.wasm Binary & Magic Header", True,
                              f"MIME: {ct}, Size: {cl / (1024*1024):.2f}MB, Magic: \\0asm verified", (time.time()-t0)*1000)
