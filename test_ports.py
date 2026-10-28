@@ -7,8 +7,9 @@ import base64
 import os
 
 def test_http():
-    print("=== Testing HTTP on 8080 ===")
-    url_base = "http://127.0.0.1:8080"
+    http_port = os.environ.get("HTTP_PORT", "8080")
+    print(f"=== Testing HTTP on {http_port} ===")
+    url_base = f"http://127.0.0.1:{http_port}"
 
     # Test / (index.html)
     req = urllib.request.Request(f"{url_base}/")
@@ -51,7 +52,7 @@ def test_http():
         print(f"GET /does_not_exist.bin -> Status: {e.code} (Expected 404)")
         assert e.code == 404
 
-    print("HTTP 8080 test PASSED!\n")
+    print("HTTP 8087 test PASSED!\n")
 
 def test_tcp():
     print("=== Testing TCP Native on 8088 ===")
@@ -147,4 +148,5 @@ if __name__ == "__main__":
     test_http()
     test_tcp()
     test_websocket()
-    print("ALL THREE PORTS (8080, 8088, 8089) VERIFIED SUCCESSFULLY!")
+    port = os.environ.get("HTTP_PORT", "8080")
+    print(f"ALL THREE PORTS ({port}, 8088, 8089) VERIFIED SUCCESSFULLY!")

@@ -81,10 +81,11 @@ fn main() {
     let hub = Arc::new(MessageHub::new());
     let next_id = Arc::new(AtomicUsize::new(1));
 
-    // 1. 启动内置 HTTP 静态 Web 服务器 (8080)
+    // 1. 启动内置 HTTP 静态 Web 服务器 (默认 8080，支持 HTTP_PORT 环境变量)
     let web_root = find_web_dir();
-    let http_addr = "0.0.0.0:8080";
-    if let Err(e) = start_http_server(http_addr, web_root) {
+    let http_port = std::env::var("HTTP_PORT").unwrap_or_else(|_| "8080".to_string());
+    let http_addr = format!("0.0.0.0:{}", http_port);
+    if let Err(e) = start_http_server(&http_addr, web_root) {
         eprintln!("[HTTP Server Error] Failed to bind {}: {:?}", http_addr, e);
     }
 
