@@ -1,106 +1,76 @@
+mod http_server;
+mod hub;
+mod scheme_game;
+
 use std::env;
-use std::fs;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use http_server::{find_web_dir, start_http_server};
+use hub::MessageHub;
+use scheme_game::SchemeGame;
+
 use quad_net::quad_socket::server::{listen, Settings, SocketHandle};
 use shared::{ClientMsg, ServerMsg};
-use steel::steel_vm::engine::Engine;
-use steel::steel_vm::register_fn::RegisterFn;
-
-static SEED: AtomicU64 = AtomicU64::new(88172645463325252);
-fn prng() -> f64 {
-    let mut x = SEED.load(Ordering::Relaxed);
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    SEED.store(x, Ordering::Relaxed);
-    (x as f64) / (u64::MAX as f64)
-}
 
 #[derive(Default)]
 struct ClientSession {
-    id: Option<String>,
+    id: Mutex<Option<String>>,
 }
 
-struct SchemeGame {
-    engine: Mutex<Engine>,
-}
-
-impl SchemeGame {
-    pub fn new(script_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let script = fs::read_to_string(script_path)?;
-        let mut engine = Engine::new();
-        engine.register_fn("random", prng);
-        engine.run(script)?;
-        engine.run("(init-game)".to_string())?;
-        println!("[SchemeGame] Successfully loaded script '{}' and initialized world.", script_path);
-        Ok(Self {
-            engine: Mutex::new(engine),
-        })
-    }
-
-    pub fn on_join(&self, id: &str) {
-        let mut engine = self.engine.lock().unwrap();
-        let code = format!(r#"(on-player-join "{}")"#, id);
-        let _ = engine.run(code);
-        println!("[SchemeGame] Player joined: {}", id);
-    }
-
-    pub fn on_leave(&self, id: &str) {
-        let mut engine = self.engine.lock().unwrap();
-        let code = format!(r#"(on-player-leave "{}")"#, id);
-        let _ = engine.run(code);
-        println!("[SchemeGame] Player left: {}", id);
-    }
-
-    pub fn on_move(&self, id: &str, dx: f32, dz: f32, yaw: f32) {
-        let mut engine = self.engine.lock().unwrap();
-        let code = format!(r#"(on-player-move "{}" {} {} {})"#, id, dx, dz, yaw);
-        let _ = engine.run(code);
-    }
-
-    pub fn on_command(&self, id: &str, cmd: &str) -> String {
-        let mut engine = self.engine.lock().unwrap();
-        let safe_cmd = cmd.replace('\\', "\\\\").replace('"', "\\\"");
-        let code = format!(r#"(on-player-command "{}" "{}")"#, id, safe_cmd);
-        match engine.run(code) {
-            Ok(res) => {
-                if let Some(first) = res.first() {
-                    first.to_string().trim_matches('"').to_string()
-                } else {
-                    "OK".to_string()
-                }
-            }
-            Err(e) => format!("Scheme Error: {:?}", e),
+impl ClientSession {
+    fn get_or_assign_id(
+        &self,
+        next_id: &AtomicUsize,
+        hub: &MessageHub,
+        game: &SchemeGame,
+        handle: &mut SocketHandle,
+    ) -> String {
+        let mut id_lock = self.id.lock().unwrap();
+        if let Some(ref existing) = *id_lock {
+            return existing.clone();
         }
-    }
 
-    pub fn get_client_state_json(&self, id: &str) -> String {
-        let mut engine = self.engine.lock().unwrap();
-        let code = format!(r#"(get-client-state-json "{}")"#, id);
-        match engine.run(code) {
-            Ok(res) => {
-                if let Some(first) = res.first() {
-                    first.to_string().trim_matches('"').to_string()
-                } else {
-                    "{}".to_string()
-                }
-            }
-            Err(_) => "{}".to_string(),
+        let new_id = format!("player_{}", next_id.fetch_add(1, Ordering::SeqCst));
+        *id_lock = Some(new_id.clone());
+
+        hub.register(&new_id);
+        game.on_join(&new_id);
+
+        let active_count = hub.active_count();
+        println!(
+            "[Session] Client connected: {} (Active: {})",
+            new_id, active_count
+        );
+
+        // 下发欢迎包
+        let welcome = ServerMsg::Welcome {
+            client_id: new_id.clone(),
+        };
+        if let Ok(bytes) = serde_json::to_vec(&welcome) {
+            let _ = handle.send(&bytes);
         }
-    }
 
-    pub fn tick(&self, dt: f32) {
-        let mut engine = self.engine.lock().unwrap();
-        let code = format!(r#"(game-tick {})"#, dt);
-        let _ = engine.run(code);
+        // 全服通知有新玩家加入
+        hub.broadcast_except(
+            &new_id,
+            ServerMsg::CommandEcho {
+                success: true,
+                output: format!("[Broadcast] {} joined the world!", new_id),
+            },
+        );
+
+        new_id
     }
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let script_path = args.get(1).map(|s| s.as_str()).unwrap_or("games/space_arena.scm");
+    let script_path = args
+        .get(1)
+        .map(|s| s.as_str())
+        .unwrap_or("games/space_arena.scm");
 
     println!("====================================================");
     println!("      LispCraft Game Server (Rust + Steel Scheme)   ");
@@ -108,70 +78,175 @@ fn main() {
     println!("Loading Scheme game definition from: {}", script_path);
 
     let game = Arc::new(SchemeGame::new(script_path).expect("Failed to initialize Scheme game"));
+    let hub = Arc::new(MessageHub::new());
     let next_id = Arc::new(AtomicUsize::new(1));
 
-    // 启动物理与逻辑 Tick 线程
-    let tick_game = game.clone();
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(Duration::from_millis(50));
-            tick_game.tick(0.05);
-        }
-    });
+    // 1. 启动内置 HTTP 静态 Web 服务器 (8080)
+    let web_root = find_web_dir();
+    let http_addr = "0.0.0.0:8080";
+    if let Err(e) = start_http_server(http_addr, web_root) {
+        eprintln!("[HTTP Server Error] Failed to bind {}: {:?}", http_addr, e);
+    }
 
-    // quad-net 服务端事件配置
+    // 2. 启动物理与游戏逻辑 Tick 线程 (20 TPS, 50ms)
+    let tick_game = game.clone();
+    std::thread::Builder::new()
+        .name("logic-tick".to_string())
+        .spawn(move || loop {
+            let start = Instant::now();
+            tick_game.tick(0.05);
+            let elapsed = start.elapsed();
+            if elapsed > Duration::from_millis(5) {
+                eprintln!("[Tick Warning] Logic tick took {:?}", elapsed);
+            }
+            if elapsed < Duration::from_millis(50) {
+                std::thread::sleep(Duration::from_millis(50) - elapsed);
+            }
+        })
+        .expect("Failed to spawn logic tick thread");
+
+    // 3. 配置 quad-net 网络服务端 (TCP 8088 / WebSocket 8089)
     let game_for_msg = game.clone();
     let game_for_timer = game.clone();
     let game_for_disc = game.clone();
+
+    let hub_for_msg = hub.clone();
+    let hub_for_timer = hub.clone();
+    let hub_for_disc = hub.clone();
+
     let next_id_for_msg = next_id.clone();
+    let next_id_for_timer = next_id.clone();
 
     let settings = Settings {
         on_message: move |handle: &mut SocketHandle, session: &mut ClientSession, data: Vec<u8>| {
-            if session.id.is_none() {
-                let id = format!("player_{}", next_id_for_msg.fetch_add(1, Ordering::SeqCst));
-                session.id = Some(id.clone());
-                game_for_msg.on_join(&id);
-
-                // 发送欢迎包
-                let welcome = ServerMsg::Welcome { client_id: id };
-                if let Ok(bytes) = serde_json::to_vec(&welcome) {
-                    let _ = handle.send(&bytes);
-                }
-            }
-
-            let client_id = session.id.as_ref().unwrap();
+            let client_id = session.get_or_assign_id(
+                &next_id_for_msg,
+                &hub_for_msg,
+                &game_for_msg,
+                handle,
+            );
 
             if let Ok(msg) = serde_json::from_slice::<ClientMsg>(&data) {
                 match msg {
                     ClientMsg::Move { dx, dz, yaw } => {
-                        game_for_msg.on_move(client_id, dx, dz, yaw);
+                        game_for_msg.on_move(&client_id, dx, dz, yaw);
                     }
                     ClientMsg::Action { action_id: _ } => {}
                     ClientMsg::Command(cmd) => {
-                        println!("[Server] Received command from {}: {}", client_id, cmd);
-                        let result = game_for_msg.on_command(client_id, &cmd);
-                        let echo = ServerMsg::CommandEcho {
-                            success: true,
-                            output: result,
-                        };
-                        if let Ok(bytes) = serde_json::to_vec(&echo) {
-                            let _ = handle.send(&bytes);
+                        println!("[Server] Command from {}: '{}'", client_id, cmd);
+
+                        // 广播指令：以 "say " 或 "all " 开头
+                        if let Some(content) = cmd.strip_prefix("say ").or_else(|| cmd.strip_prefix("all ")) {
+                            let broadcast_text = format!("{}: {}", client_id, content.trim());
+                            hub_for_msg.broadcast(ServerMsg::CommandEcho {
+                                success: true,
+                                output: broadcast_text,
+                            });
+                        }
+                        // 在线玩家查询：list 或 who
+                        else if cmd == "list" || cmd == "who" {
+                            let players = hub_for_msg.active_players().join(", ");
+                            let echo = ServerMsg::CommandEcho {
+                                success: true,
+                                output: format!("Online players ({}): {}", hub_for_msg.active_count(), players),
+                            };
+                            if let Ok(bytes) = serde_json::to_vec(&echo) {
+                                let _ = handle.send(&bytes);
+                            }
+                        }
+                        // 私信指令：tell <target> <message>
+                        else if let Some(rest) = cmd.strip_prefix("tell ") {
+                            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                            if parts.len() == 2 {
+                                let target = parts[0].trim();
+                                let whisper = parts[1].trim();
+                                hub_for_msg.send_to(
+                                    target,
+                                    ServerMsg::CommandEcho {
+                                        success: true,
+                                        output: format!("[Whisper from {}]: {}", client_id, whisper),
+                                    },
+                                );
+                                let _ = handle.send(
+                                    &serde_json::to_vec(&ServerMsg::CommandEcho {
+                                        success: true,
+                                        output: format!("[Whisper to {}]: {}", target, whisper),
+                                    })
+                                    .unwrap_or_default(),
+                                );
+                            } else {
+                                let _ = handle.send(
+                                    &serde_json::to_vec(&ServerMsg::CommandEcho {
+                                        success: false,
+                                        output: "Usage: tell <target_id> <message>".to_string(),
+                                    })
+                                    .unwrap_or_default(),
+                                );
+                            }
+                        }
+                        // 其他游戏逻辑/管理命令，交由 Scheme 执行
+                        else {
+                            let result = game_for_msg.on_command(&client_id, &cmd);
+                            let echo = ServerMsg::CommandEcho {
+                                success: true,
+                                output: result,
+                            };
+                            if let Ok(bytes) = serde_json::to_vec(&echo) {
+                                let _ = handle.send(&bytes);
+                            }
+
+                            // 如果是生成实体的命令，向其他玩家同步广播提示
+                            if cmd.starts_with("spawn ") {
+                                hub_for_msg.broadcast_except(
+                                    &client_id,
+                                    ServerMsg::CommandEcho {
+                                        success: true,
+                                        output: format!("[World] {} spawned an entity!", client_id),
+                                    },
+                                );
+                            }
                         }
                     }
                 }
             }
         },
         on_timer: move |handle: &mut SocketHandle, session: &ClientSession| {
-            if let Some(ref client_id) = session.id {
-                let json_str = game_for_timer.get_client_state_json(client_id);
-                if !json_str.is_empty() && json_str != "{}" {
-                    let _ = handle.send(json_str.as_bytes());
+            // 获取或自动分配新连接客户端 ID
+            let client_id = session.get_or_assign_id(
+                &next_id_for_timer,
+                &hub_for_timer,
+                &game_for_timer,
+                handle,
+            );
+
+            // 1. 投递待发送的私信与广播包
+            for msg in hub_for_timer.drain(&client_id) {
+                if let Ok(bytes) = serde_json::to_vec(&msg) {
+                    let _ = handle.send(&bytes);
                 }
+            }
+
+            // 2. 状态包定时同步 (~25 TPS)
+            let json_str = game_for_timer.get_client_state_json(&client_id);
+            if !json_str.is_empty() && json_str != "{}" {
+                let _ = handle.send(json_str.as_bytes());
             }
         },
         on_disconnect: move |session: &ClientSession| {
-            if let Some(ref client_id) = session.id {
-                game_for_disc.on_leave(client_id);
+            if let Some(client_id) = session.id.lock().unwrap().take() {
+                hub_for_disc.unregister(&client_id);
+                game_for_disc.on_leave(&client_id);
+
+                let remaining = hub_for_disc.active_count();
+                println!(
+                    "[Session] Client disconnected: {} (Active: {})",
+                    client_id, remaining
+                );
+
+                hub_for_disc.broadcast(ServerMsg::CommandEcho {
+                    success: true,
+                    output: format!("[Broadcast] {} left the world.", client_id),
+                });
             }
         },
         timer: Some(Duration::from_millis(40)), // ~25 TPS 状态同步
@@ -180,6 +255,77 @@ fn main() {
 
     let tcp_addr = "0.0.0.0:8088";
     let ws_addr = "0.0.0.0:8089";
-    println!("[Server] Listening on TCP: {} (Native) & WebSocket: {} (WASM)", tcp_addr, ws_addr);
+    println!(
+        "[Server] Listening on TCP: {} (Native) & WebSocket: {} (WASM)",
+        tcp_addr, ws_addr
+    );
+    println!("====================================================");
+    println!("Ready for connections! Press Ctrl+C to exit.");
+
     listen(tcp_addr, ws_addr, settings);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_hub() {
+        let hub = MessageHub::new();
+        hub.register("p1");
+        hub.register("p2");
+        assert_eq!(hub.active_count(), 2);
+
+        // 私信测试
+        hub.send_to(
+            "p1",
+            ServerMsg::CommandEcho {
+                success: true,
+                output: "hello p1".to_string(),
+            },
+        );
+        let p1_msgs = hub.drain("p1");
+        assert_eq!(p1_msgs.len(), 1);
+        assert!(hub.drain("p1").is_empty());
+
+        // 广播测试
+        hub.broadcast(ServerMsg::CommandEcho {
+            success: true,
+            output: "all".to_string(),
+        });
+        assert_eq!(hub.drain("p1").len(), 1);
+        assert_eq!(hub.drain("p2").len(), 1);
+
+        hub.unregister("p1");
+        assert_eq!(hub.active_count(), 1);
+    }
+
+    #[test]
+    fn test_scheme_game() {
+        let game = SchemeGame::new("games/space_arena.scm").expect("Failed to initialize game");
+        game.on_join("tester_1");
+        game.on_move("tester_1", 1.0, 0.0, 0.0);
+        let echo = game.on_command("tester_1", "heal");
+        assert!(echo.contains("Health restored") || echo.contains("100%"));
+        let state = game.get_client_state_json("tester_1");
+        assert!(state.contains("\"client_id\":\"tester_1\""));
+        game.on_leave("tester_1");
+
+        // 测试地牢模式脚本
+        let dungeon = SchemeGame::new("games/dungeon.scm").expect("Failed to initialize dungeon");
+        dungeon.on_join("tester_2");
+        let echo2 = dungeon.on_command("tester_2", "torch");
+        assert!(echo2.contains("torch") || echo2.contains("Placed"));
+        let state2 = dungeon.get_client_state_json("tester_2");
+        assert!(state2.contains("\"client_id\":\"tester_2\""));
+        dungeon.on_leave("tester_2");
+    }
+
+    #[test]
+    fn test_mime_types() {
+        use std::path::Path;
+        assert_eq!(http_server::mime_type_for_path(Path::new("client.wasm")), "application/wasm");
+        assert_eq!(http_server::mime_type_for_path(Path::new("gl.js")), "application/javascript");
+        assert_eq!(http_server::mime_type_for_path(Path::new("index.html")), "text/html; charset=utf-8");
+    }
 }
