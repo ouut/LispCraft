@@ -39,13 +39,12 @@ function ws_connect(addr) {
                 "data": msg.data
             });
         } else {
+            var text = new TextDecoder("utf-8").decode(msg.data);
             var buffer = new Uint8Array(msg.data);
-            received_buffer.push({
-                "text": 0,
-                "data": buffer
-            });
+            buffer.text = 1;
+            buffer.data = text;
+            received_buffer.push(buffer);
         }
-
     }
 };
 

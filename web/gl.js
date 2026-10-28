@@ -227,9 +227,10 @@ var GL = {
     validateGLObjectID: function (objectHandleArray, objectID, callerFunctionName, objectReadableType) {
         if (objectID != 0) {
             if (objectHandleArray[objectID] === null) {
-                console.error(callerFunctionName + ' called with an already deleted ' + objectReadableType + ' ID ' + objectID + '!');
+                // Ignore unbinding already deleted objects gracefully without spamming console error
+                return;
             } else if (!objectHandleArray[objectID]) {
-                console.error(callerFunctionName + ' called with an invalid ' + objectReadableType + ' ID ' + objectID + '!');
+                console.warn(callerFunctionName + ' called with an invalid ' + objectReadableType + ' ID ' + objectID + '!');
             }
         }
     },

@@ -1,7 +1,34 @@
 use macroquad::prelude::*;
-use quad_net::quad_socket::client::QuadSocket;
+use quad_net::web_socket::WebSocket;
 use shared::{ClientMsg, ClientState, ServerMsg};
 use std::collections::HashSet;
+
+/// 生产级全平台通用 WebSocket 套接字封装 (消除 255 字节 TCP 限制并统一双端协议)
+pub struct GameSocket {
+    ws: WebSocket,
+}
+
+impl GameSocket {
+    pub fn connect(addr: &str) -> Result<Self, String> {
+        let addr_str = addr.to_string();
+        let res = std::panic::catch_unwind(move || {
+            WebSocket::connect(addr_str)
+        });
+        match res {
+            Ok(Ok(ws)) => Ok(GameSocket { ws }),
+            Ok(Err(e)) => Err(format!("{:?}", e)),
+            Err(_) => Err(format!("Could not connect to WebSocket at {}", addr)),
+        }
+    }
+
+    pub fn send(&mut self, data: &[u8]) {
+        self.ws.send_bytes(data);
+    }
+
+    pub fn try_recv(&mut self) -> Option<Vec<u8>> {
+        self.ws.try_recv()
+    }
+}
 
 /// 日志与通知条目
 struct LogEntry {
@@ -60,19 +87,33 @@ fn add_log(logs: &mut Vec<LogEntry>, text: String, color: Color) {
 
 #[macroquad::main("LispCraft 3D")]
 async fn main() {
+    let ws_port = std::env::var("WS_PORT").unwrap_or_else(|_| "8089".to_string());
     #[cfg(not(target_arch = "wasm32"))]
-    let server_addr = "127.0.0.1:8088";
+    let server_addr = {
+        let mut addr = format!("ws://127.0.0.1:{}", ws_port);
+        if let Some(arg) = std::env::args().nth(1) {
+            if arg.starts_with("ws://") || arg.starts_with("wss://") {
+                addr = arg;
+            } else if arg.contains(':') {
+                addr = format!("ws://{}", arg);
+            } else {
+                addr = format!("ws://{}:{}", arg, ws_port);
+            }
+        }
+        addr
+    };
     #[cfg(target_arch = "wasm32")]
-    let server_addr = "ws://127.0.0.1:8089";
+    let server_addr = format!("ws://127.0.0.1:{}", ws_port);
 
     println!("[Client] Connecting to {}", server_addr);
-    let mut socket = match QuadSocket::connect(server_addr) {
+    let mut socket = match GameSocket::connect(&server_addr) {
         Ok(s) => Some(s),
         Err(e) => {
-            eprintln!("[Client] Connect error: {:?}", e);
+            eprintln!("[Client] Connect error: {}", e);
             None
         }
     };
+    let mut last_reconnect_time = 0.0_f32;
 
     let mut current_state: Option<ClientState> = None;
     let mut command_input = String::new();
@@ -106,6 +147,19 @@ async fn main() {
     loop {
         let dt = get_frame_time().min(0.1);
         let time = get_time() as f32;
+
+        // 自动重连机制：若尚未连接服务端，每隔 2 秒尝试重新连接
+        if socket.is_none() && time - last_reconnect_time > 2.0 {
+            last_reconnect_time = time;
+            if let Ok(s) = GameSocket::connect(&server_addr) {
+                add_log(
+                    &mut message_logs,
+                    format!("[NET] Connected to Scheme Game Server ({})", server_addr),
+                    Color::new(0.2, 0.95, 0.6, 1.0),
+                );
+                socket = Some(s);
+            }
+        }
 
         // --- 1. 网络收包与状态同步 ---
         if let Some(ref mut sock) = socket {
