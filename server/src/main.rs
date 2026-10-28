@@ -65,25 +65,91 @@ impl ClientSession {
     }
 }
 
+fn print_usage(program: &str) {
+    println!("====================================================");
+    println!("      LispCraft Game Server (Rust + Steel Scheme)   ");
+    println!("====================================================");
+    println!("Usage: {} [GAME_SCRIPT] [HTTP_PORT] [OPTIONS]", program);
+    println!();
+    println!("Positional Arguments:");
+    println!("  GAME_SCRIPT                 Path to Scheme game script (default: games/space_arena.scm)");
+    println!("  HTTP_PORT                   Optional HTTP port (default: 8087)");
+    println!();
+    println!("Options:");
+    println!("  -p, --http-port <PORT>      HTTP Web server port (default: 8087, or env HTTP_PORT)");
+    println!("  --tcp-port <PORT>           TCP native port (default: 8088, or env TCP_PORT)");
+    println!("  --ws-port <PORT>            WebSocket port (default: 8089, or env WS_PORT)");
+    println!("  -h, --help                  Print help information");
+    println!();
+    println!("Examples:");
+    println!("  {} games/space_arena.scm", program);
+    println!("  {} games/space_arena.scm 8087", program);
+    println!("  {} --http-port 8087 --tcp-port 8088 --ws-port 8089", program);
+    println!("  HTTP_PORT=8087 {} games/dungeon.scm", program);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let script_path = args
-        .get(1)
-        .map(|s| s.as_str())
-        .unwrap_or("games/space_arena.scm");
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_usage(&args[0]);
+        return;
+    }
+
+    let mut script_path = "games/space_arena.scm".to_string();
+    let mut http_port = std::env::var("HTTP_PORT").unwrap_or_else(|_| "8087".to_string());
+    let mut tcp_port = std::env::var("TCP_PORT").unwrap_or_else(|_| "8088".to_string());
+    let mut ws_port = std::env::var("WS_PORT").unwrap_or_else(|_| "8089".to_string());
+
+    let mut non_flag_args: Vec<String> = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-p" | "--http-port" => {
+                if i + 1 < args.len() {
+                    http_port = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            "--tcp-port" => {
+                if i + 1 < args.len() {
+                    tcp_port = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            "--ws-port" => {
+                if i + 1 < args.len() {
+                    ws_port = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            other if !other.starts_with('-') => {
+                non_flag_args.push(other.to_string());
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if let Some(s) = non_flag_args.get(0) {
+        script_path = s.clone();
+    }
+    if let Some(p) = non_flag_args.get(1) {
+        if p.chars().all(|c| c.is_ascii_digit()) {
+            http_port = p.clone();
+        }
+    }
 
     println!("====================================================");
     println!("      LispCraft Game Server (Rust + Steel Scheme)   ");
     println!("====================================================");
     println!("Loading Scheme game definition from: {}", script_path);
 
-    let game = Arc::new(SchemeGame::new(script_path).expect("Failed to initialize Scheme game"));
+    let game = Arc::new(SchemeGame::new(&script_path).expect("Failed to initialize Scheme game"));
     let hub = Arc::new(MessageHub::new());
     let next_id = Arc::new(AtomicUsize::new(1));
 
-    // 1. 启动内置 HTTP 静态 Web 服务器 (默认 8080，支持 HTTP_PORT 环境变量)
+    // 1. 启动内置 HTTP 静态 Web 服务器 (默认 8087，支持参数及 HTTP_PORT 环境变量)
     let web_root = find_web_dir();
-    let http_port = std::env::var("HTTP_PORT").unwrap_or_else(|_| "8080".to_string());
     let http_addr = format!("0.0.0.0:{}", http_port);
     if let Err(e) = start_http_server(&http_addr, web_root) {
         eprintln!("[HTTP Server Error] Failed to bind {}: {:?}", http_addr, e);
@@ -254,8 +320,8 @@ fn main() {
         _marker: std::marker::PhantomData,
     };
 
-    let tcp_addr = "0.0.0.0:8088";
-    let ws_addr = "0.0.0.0:8089";
+    let tcp_addr = format!("0.0.0.0:{}", tcp_port);
+    let ws_addr = format!("0.0.0.0:{}", ws_port);
     println!(
         "[Server] Listening on TCP: {} (Native) & WebSocket: {} (WASM)",
         tcp_addr, ws_addr

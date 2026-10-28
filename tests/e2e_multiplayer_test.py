@@ -252,9 +252,12 @@ class TestReportCollector:
 # 5. 各功能测试组实现
 # ============================================================================
 
-def run_http_wasm_tests(collector: TestReportCollector, base_url: str = "http://127.0.0.1:8080"):
+def run_http_wasm_tests(collector: TestReportCollector, base_url: str = None):
+    http_port = os.environ.get("HTTP_PORT", "8087")
+    if base_url is None:
+        base_url = f"http://127.0.0.1:{http_port}"
     print("\n" + "="*70)
-    print("▶ 运行测试组 1: HTTP 静态 WebAssembly 交付验证 (Port 8080)")
+    print(f"▶ 运行测试组 1: HTTP 静态 WebAssembly 交付验证 (Port {http_port})")
     print("="*70)
 
     # 1.1 根路径 index.html

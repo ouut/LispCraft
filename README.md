@@ -21,7 +21,7 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
    - 用户输入的任意字符串（如 `heal`、`tp 10 10`、`say Hello`、`spawn cube tower`）原样传输至服务端，由 Scheme 解析执行并返回执行结果。
 5. **内置三端口开箱即用 (Zero-Config Hosting)**：
    - 服务端单命令启动时自动监听：
-     - `HTTP 8080`：内置轻量异步静态 Web 服务器，托管 WebAssembly 资产（支持 WASM 流式加载）。
+     - `HTTP 8087`：内置轻量异步静态 Web 服务器，托管 WebAssembly 资产（支持 WASM 流式加载）。
      - `WebSocket 8089`：quad-net WebAssembly 实时网络通信通道。
      - `TCP 8088`：quad-net 原生桌面客户端直连通道。
 
@@ -38,16 +38,44 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 git clone https://github.com/your-username/LispCraft.git
 cd LispCraft
 
-# 启动服务端 (加载默认太空竞技场模式)
+# 启动服务端 (加载默认太空竞技场模式，默认 HTTP 端口 8087)
 cargo run --release --bin server games/space_arena.scm
 ```
 
 服务就绪后，在现代浏览器中打开一个或多个标签页访问：
-👉 **`http://localhost:8080`**
+👉 **`http://localhost:8087`**
 
 立即即可体验多玩家各自独立视角的 3D 联机环境！
 
-### 2. 桌面原生客户端启动
+### 2. 如何指定自定义端口 (Port Configuration)
+
+系统支持通过 **位置参数**、**命令行选项参数** 或 **环境变量** 自由指定端口（优先级：命令行参数 > 位置参数 > 环境变量 > 默认值）：
+
+#### 方式 A：位置参数 (最简便)
+```bash
+# 第二个参数直接指定 HTTP 端口 (例如指定 9090)
+cargo run --release --bin server games/space_arena.scm 9090
+```
+
+#### 方式 B：CLI 命令行选项参数
+```bash
+# 查看完整帮助说明
+cargo run --release --bin server -- --help
+
+# 显式指定 HTTP 端口、TCP 端口和 WebSocket 端口
+cargo run --release --bin server -- games/space_arena.scm --http-port 8087 --tcp-port 8088 --ws-port 8089
+
+# 也可以简写 -p 指定 HTTP 端口
+cargo run --release --bin server -- -p 9090
+```
+
+#### 方式 C：环境变量 (Docker / 容器化环境推荐)
+```bash
+# 通过环境变量指定
+HTTP_PORT=8087 TCP_PORT=8088 WS_PORT=8089 cargo run --release --bin server games/space_arena.scm
+```
+
+### 3. 桌面原生客户端启动
 
 服务端保持运行的前提下，可以在本地终端直接启动桌面原生窗口客户端：
 
@@ -111,7 +139,7 @@ LispCraft/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs             # 三端口启动调度与网络 Tick 主循环
-│       ├── http_server.rs      # 内置零依赖异步多线程静态 Web 服务 (8080)
+│       ├── http_server.rs      # 内置零依赖异步多线程静态 Web 服务 (默认 8087)
 │       ├── hub.rs              # 全服广播与定向会话路由消息中枢
 │       └── scheme_game.rs      # Steel Scheme 虚拟机高级绑定与原生调用加速
 ├── client/                     # 3D 客户端 (Macroquad 3D + quad-net)
