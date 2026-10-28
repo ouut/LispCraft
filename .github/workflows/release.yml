@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to publish to (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+        type: string
 
 permissions:
   contents: write
@@ -34,7 +40,7 @@ jobs:
           path: web/client.wasm
           if-no-files-found: error
 
-  build-and-release:
+  build-and-package:
     name: Build Binary (${{ matrix.target }})
     needs: build-wasm
     runs-on: ${{ matrix.os }}
@@ -110,11 +116,54 @@ jobs:
           cp README.md "$DIST_DIR/"
           7z a "${{ matrix.artifact_name }}.zip" "$DIST_DIR"
 
+      - name: Upload packaged archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish Release to GitHub
+    needs: [build-wasm, build-and-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: lispcraft-*
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: vars
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          elif [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          else
+            TAG="v0.1.0"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: List artifacts to release
+        run: |
+          echo "Publishing release with tag: ${{ steps.vars.outputs.tag }}"
+          ls -lh dist/
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ${{ matrix.artifact_name }}.*
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.tag }}
+          files: dist/*
           generate_release_notes: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
