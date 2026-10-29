@@ -35,7 +35,7 @@ mod tests {
         let input = LispMotionInput {
             dx: 1.0,
             dz: -0.5,
-            yaw: 3.14,
+            yaw: std::f32::consts::PI,
         };
         let env: LispClientEnvelope = ClientEnvelope::Input(input);
         let serialized = serde_json::to_string(&env).unwrap();

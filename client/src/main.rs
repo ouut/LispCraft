@@ -415,7 +415,7 @@ async fn main() {
 
             // 字符键入
             while let Some(c) = get_char_pressed() {
-                if c >= ' ' && c <= '~' {
+                if (' '..='~').contains(&c) {
                     command_input.push(c);
                 }
             }
@@ -951,7 +951,7 @@ async fn main() {
                 Color::new(0.0, 0.9, 1.0, 1.0),
             );
             draw_text(
-                &format!("PILOT: {}", state.client_id),
+                format!("PILOT: {}", state.client_id),
                 dash_x + 14.0,
                 dash_y + 44.0,
                 16.0,
@@ -1004,7 +1004,7 @@ async fn main() {
                 );
             }
             draw_text(
-                &format!("{:.0}/{:.0}", state.hp, state.max_hp),
+                format!("{:.0}/{:.0}", state.hp, state.max_hp),
                 hp_bar_x + hp_bar_w + 10.0,
                 dash_y + 68.0,
                 13.0,
@@ -1015,7 +1015,7 @@ async fn main() {
             let cardinal = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
                 [((yaw_deg + 22.5) / 45.0) as usize % 8];
             draw_text(
-                &format!(
+                format!(
                     "POS: ({:.1}, {:.1}, {:.1})",
                     state.camera_target[0], state.camera_target[1], state.camera_target[2]
                 ),
@@ -1025,7 +1025,7 @@ async fn main() {
                 Color::new(0.75, 0.85, 0.95, 1.0),
             );
             draw_text(
-                &format!(
+                format!(
                     "HDG: {:.0}° [{}] | SCORE: {}",
                     yaw_deg, cardinal, state.score
                 ),
@@ -1248,13 +1248,13 @@ async fn main() {
                 Color::new(0.2, 1.0, 0.8, 1.0),
             );
 
-            let cursor = if ((time * 3.0) as usize) % 2 == 0 {
+            let cursor = if ((time * 3.0) as usize).is_multiple_of(2) {
                 "_"
             } else {
                 " "
             };
             draw_text(
-                &format!("COMMAND > {}{}", command_input, cursor),
+                format!("COMMAND > {}{}", command_input, cursor),
                 bar_x + 14.0,
                 bar_y + 28.0,
                 20.0,
