@@ -23,38 +23,62 @@ function ws_is_connected() {
 
 function ws_connect(addr) {
     var raw_addr = consume_js_object(addr);
-    if (typeof location !== 'undefined' && location.hostname && location.hostname !== "127.0.0.1" && location.hostname !== "localhost") {
-        raw_addr = raw_addr.replace("127.0.0.1", location.hostname).replace("localhost", location.hostname);
-    }
-    quad_socket = new WebSocket(raw_addr);
-    quad_socket.binaryType = 'arraybuffer';
-    quad_socket.onopen = function() {
-        connected = 1;
-    };
-
-    quad_socket.onmessage = function(msg) {
-        if (typeof msg.data == "string") {
-            received_buffer.push({
-                "text": 1,
-                "data": msg.data
-            });
-        } else {
-            var text = new TextDecoder("utf-8").decode(msg.data);
-            var buffer = new Uint8Array(msg.data);
-            buffer.text = 1;
-            buffer.data = text;
-            received_buffer.push(buffer);
+    if (typeof location !== 'undefined' && location.host) {
+        var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var path = '/ws';
+        if (typeof raw_addr === 'string' && raw_addr.indexOf('/') !== -1) {
+            var parts = raw_addr.split('/');
+            if (parts.length > 3) {
+                path = '/' + parts.slice(3).join('/');
+            }
         }
+        raw_addr = protocol + '//' + location.host + path;
+    }
+    console.log('[quad-net] Connecting WebSocket to:', raw_addr);
+    try {
+        quad_socket = new WebSocket(raw_addr);
+        quad_socket.binaryType = 'arraybuffer';
+        quad_socket.onopen = function() {
+            console.log('[quad-net] WebSocket connected successfully to', raw_addr);
+            connected = 1;
+        };
+        quad_socket.onclose = function(e) {
+            console.log('[quad-net] WebSocket disconnected, code:', e.code);
+            connected = 0;
+        };
+        quad_socket.onerror = function(err) {
+            console.error('[quad-net] WebSocket error:', err);
+            connected = 0;
+        };
+
+        quad_socket.onmessage = function(msg) {
+            if (typeof msg.data == "string") {
+                received_buffer.push({
+                    "text": 1,
+                    "data": msg.data
+                });
+            } else {
+                var text = new TextDecoder("utf-8").decode(msg.data);
+                var buffer = new Uint8Array(msg.data);
+                buffer.text = 1;
+                buffer.data = text;
+                received_buffer.push(buffer);
+            }
+        };
+    } catch (e) {
+        console.error('[quad-net] Failed to create WebSocket:', e);
+        connected = 0;
     }
 };
 
 function ws_send(data) {
-    var array = consume_js_object(data);
-    // here should be a nice typecheck on array.is_string or whatever
-    if (array.buffer != undefined) {
-        quad_socket.send(array.buffer);
+    var obj = consume_js_object(data);
+    if (typeof obj === "string") {
+        quad_socket.send(obj);
+    } else if (obj && obj.buffer !== undefined) {
+        quad_socket.send(obj.buffer);
     } else {
-        quad_socket.send(array);
+        quad_socket.send(obj);
     }
 };
 

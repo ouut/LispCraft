@@ -33,15 +33,63 @@ pub fn find_web_dir() -> PathBuf {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let script_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "games/space_arena.scm".to_string());
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("====================================================");
+        println!("  LispCraft 3D Industrial Gateway Server (v0.2.0)");
+        println!("====================================================");
+        println!("Usage: {} [GAME_SCRIPT] [PORT] [OPTIONS]", args[0]);
+        println!();
+        println!("Options:");
+        println!("  -p, --port <PORT>      Server port (default: 8087, or PORT/HTTP_PORT env)");
+        println!("  -h, --help             Print help information");
+        return Ok(());
+    }
 
-    let port: u16 = std::env::var("PORT")
+    let mut script_path = "games/space_arena.scm".to_string();
+    let mut port: u16 = std::env::var("PORT")
         .or_else(|_| std::env::var("HTTP_PORT"))
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(8080);
+        .unwrap_or(8087);
+
+    let mut positional = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "-p" || arg == "--port" || arg == "-port" || arg == "--http-port" {
+            if i + 1 < args.len() {
+                if let Ok(p) = args[i + 1].parse::<u16>() {
+                    port = p;
+                }
+                i += 1;
+            }
+        } else if let Some(p_str) = arg.strip_prefix("--port=") {
+            if let Ok(p) = p_str.parse::<u16>() {
+                port = p;
+            }
+        } else if let Some(p_str) = arg.strip_prefix("-p=") {
+            if let Ok(p) = p_str.parse::<u16>() {
+                port = p;
+            }
+        } else if !arg.starts_with('-') {
+            positional.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    if let Some(first_pos) = positional.first() {
+        if let Ok(p) = first_pos.parse::<u16>() {
+            port = p;
+        } else {
+            script_path = first_pos.clone();
+            if let Some(second_pos) = positional.get(1) {
+                if let Ok(p) = second_pos.parse::<u16>() {
+                    port = p;
+                }
+            }
+        }
+    }
 
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
     let web_dir = find_web_dir();

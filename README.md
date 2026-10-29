@@ -39,34 +39,41 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 git clone https://github.com/ouut/LispCraft.git
 cd LispCraft
 
-# 启动服务端 (加载默认太空竞技场模式，默认端口 8080)
+# 启动服务端 (加载默认太空竞技场模式，默认端口 8087)
 cargo run --release --bin server games/space_arena.scm
 ```
 
 服务就绪后，在现代浏览器中打开一个或多个标签页访问：
-👉 **`http://localhost:8080`**
+👉 **`http://localhost:8087`**
 
 立即即可体验多玩家各自独立视角的 3D 联机环境！
 
 ### 2. 如何指定自定义端口 (Port Configuration)
 
-系统支持通过 **环境变量** 自由指定网关监听端口（默认 8080）：
+系统支持通过 **命令行位置参数**、**选项参数** 或 **环境变量** 自由指定网关监听端口（默认 8087）：
 
 ```bash
-# 通过 PORT 或 HTTP_PORT 指定自定义端口 (如 8087)
+# 方式 A：位置参数
+cargo run --release --bin server games/space_arena.scm 8081
+
+# 方式 B：CLI 参数 (-p 或 --port)
+cargo run --release --bin server games/space_arena.scm --port 8081
+
+# 方式 C：环境变量 (PORT 或 HTTP_PORT)
 PORT=8087 cargo run --release --bin server games/space_arena.scm
 ```
 
 ### 3. 桌面原生客户端启动
 
-服务端保持运行的前提下，可以在本地终端直接启动桌面原生窗口客户端：
+服务端保持运行的前提下，可以在本地终端直接启动桌面原生窗口客户端（自动直连服务端默认端口 8087）：
 
 ```bash
-# 直连本地默认端口
+# 直连默认端口 (8087)
 cargo run --release --bin client
 
-# 或指定远程服务端地址
-cargo run --release --bin client -- ws://127.0.0.1:8080/ws
+# 或指定端口 / 远程地址
+cargo run --release --bin client 8081
+cargo run --release --bin client -- ws://127.0.0.1:8087/ws
 ```
 
 桌面客户端与网页端玩家完全互通同服竞技。

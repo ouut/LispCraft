@@ -45,7 +45,7 @@ import urllib.error
 import sys
 from typing import Optional, Tuple, List, Dict, Any, Callable
 
-SERVER_PORT = int(os.environ.get("PORT", os.environ.get("HTTP_PORT", "8080")))
+SERVER_PORT = int(os.environ.get("PORT", os.environ.get("HTTP_PORT", "8087")))
 
 # ============================================================================
 # 1. 轻量化原生 WebSocket 客户端 (基于 RFC 6455 规范)

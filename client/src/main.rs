@@ -25,7 +25,25 @@ impl GameSocket {
     }
 
     pub fn send(&mut self, data: &[u8]) {
-        self.ws.send_bytes(data);
+        if let Ok(text) = std::str::from_utf8(data) {
+            self.ws.send_text(text);
+        } else {
+            self.ws.send_bytes(data);
+        }
+    }
+
+    pub fn send_text(&mut self, text: &str) {
+        self.ws.send_text(text);
+    }
+
+    pub fn send_envelope(&mut self, env: &ClientEnvelope<LispMotionInput, LispGameCommand>) {
+        if let Ok(text) = serde_json::to_string(env) {
+            self.ws.send_text(&text);
+        }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.ws.connected()
     }
 
     pub fn try_recv(&mut self) -> Option<Vec<u8>> {
@@ -90,29 +108,55 @@ fn add_log(logs: &mut Vec<LogEntry>, text: String, color: Color) {
 
 #[macroquad::main("LispCraft 3D")]
 async fn main() {
-    let ws_port = std::env::var("PORT")
+    #[cfg(not(target_arch = "wasm32"))]
+    let args: Vec<String> = std::env::args().collect();
+    let default_port = std::env::var("PORT")
         .or_else(|_| std::env::var("WS_PORT"))
-        .unwrap_or_else(|_| "8080".to_string());
+        .or_else(|_| std::env::var("HTTP_PORT"))
+        .unwrap_or_else(|_| "8087".to_string());
+
     #[cfg(not(target_arch = "wasm32"))]
     let server_addr = {
-        let mut addr = format!("ws://127.0.0.1:{}/ws", ws_port);
-        if let Some(arg) = std::env::args().nth(1) {
-            if arg.starts_with("ws://") || arg.starts_with("wss://") {
-                addr = if arg.ends_with("/ws") {
-                    arg
-                } else {
-                    format!("{}/ws", arg.trim_end_matches('/'))
-                };
+        let mut target_port = default_port.clone();
+        let mut target_host = "127.0.0.1".to_string();
+        let mut explicit_addr: Option<String> = None;
+
+        let mut i = 1;
+        while i < args.len() {
+            let arg = &args[i];
+            if arg == "-p" || arg == "--port" || arg == "-port" || arg == "--ws-port" {
+                if i + 1 < args.len() {
+                    target_port = args[i + 1].clone();
+                    i += 1;
+                }
+            } else if let Some(p) = arg.strip_prefix("--port=") {
+                target_port = p.to_string();
+            } else if let Some(p) = arg.strip_prefix("-p=") {
+                target_port = p.to_string();
+            } else if arg.starts_with("ws://") || arg.starts_with("wss://") {
+                explicit_addr = Some(arg.clone());
+            } else if arg.chars().all(|c| c.is_ascii_digit()) {
+                target_port = arg.clone();
             } else if arg.contains(':') {
-                addr = format!("ws://{}/ws", arg.trim_end_matches('/'));
-            } else {
-                addr = format!("ws://{}:{}/ws", arg, ws_port);
+                explicit_addr = Some(format!("ws://{}/ws", arg.trim_end_matches('/')));
+            } else if !arg.starts_with('-') {
+                target_host = arg.clone();
             }
+            i += 1;
         }
-        addr
+
+        if let Some(explicit) = explicit_addr {
+            if explicit.ends_with("/ws") {
+                explicit
+            } else {
+                format!("{}/ws", explicit.trim_end_matches('/'))
+            }
+        } else {
+            format!("ws://{}:{}/ws", target_host, target_port)
+        }
     };
     #[cfg(target_arch = "wasm32")]
-    let server_addr = format!("ws://127.0.0.1:{}/ws", ws_port);
+    let server_addr = format!("ws://127.0.0.1:{}/ws", default_port);
 
     println!("[Client] Connecting to {}", server_addr);
     let mut socket = match GameSocket::connect(&server_addr) {
@@ -202,8 +246,12 @@ async fn main() {
         }
 
         // --- 1. 网络收包与状态同步 ---
+        let mut conn_dropped = false;
         if let Some(ref mut sock) = socket {
-            while let Some(bytes) = sock.try_recv() {
+            if !sock.is_connected() {
+                conn_dropped = true;
+            } else {
+                while let Some(bytes) = sock.try_recv() {
                 if let Ok(envelope) = serde_json::from_slice::<ServerEnvelope<ClientState, LispEvent>>(&bytes) {
                     match envelope {
                         ServerEnvelope::AuthSuccess { player_id, server_tick } => {
@@ -321,6 +369,16 @@ async fn main() {
                     }
                 }
             }
+        }
+    }
+        if conn_dropped {
+            socket = None;
+            current_state = None;
+            add_log(
+                &mut message_logs,
+                "[NET] Disconnected from server. Reconnecting...".to_string(),
+                Color::new(1.0, 0.4, 0.4, 1.0),
+            );
         }
 
         // --- 2. 鼠标视角拖拽与滚轮缩放 ---
