@@ -710,6 +710,7 @@ dependencies = [
 [[package]]
 name = "game_net"
 version = "0.2.0"
+source = "git+https://github.com/ouut/2d_minecraft.git#7c0a10e4e2ab0338b768fd18cd4560c1650aa564"
 dependencies = [
  "postcard",
  "serde",
@@ -719,6 +720,7 @@ dependencies = [
 [[package]]
 name = "game_script"
 version = "0.2.0"
+source = "git+https://github.com/ouut/2d_minecraft.git#7c0a10e4e2ab0338b768fd18cd4560c1650aa564"
 dependencies = [
  "crossbeam-queue",
  "serde",
@@ -729,6 +731,7 @@ dependencies = [
 [[package]]
 name = "game_server"
 version = "0.2.0"
+source = "git+https://github.com/ouut/2d_minecraft.git#7c0a10e4e2ab0338b768fd18cd4560c1650aa564"
 dependencies = [
  "axum",
  "crossbeam-queue",

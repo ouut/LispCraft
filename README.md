@@ -1,8 +1,8 @@
 # LispCraft 🪐
 
-> **基于 Rust + Steel (Scheme) + Macroquad 3D + quad-net 的极简多人 3D 游戏引擎**
+> **基于 Rust + Steel (Scheme) + Macroquad 3D + 通用底座 (game_net / game_server / game_script v0.2.0) 的极简多人 3D 游戏引擎**
 
-LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人游戏架构原型。系统将 **Steel Scheme** 脚本虚拟机嵌入至 Rust 服务端作为唯一的游戏世界逻辑大脑，客户端基于 **Macroquad 3D** 编译为 **WebAssembly** 在浏览器中独立运行，通过 **quad-net** 实现跨平台低延迟双向通信。
+LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人游戏架构。系统将 **Steel Scheme** 脚本虚拟机嵌入至 Rust 服务端作为唯一的游戏世界逻辑大脑，采用通用游戏基础设施 **Layer 0**（`game_net`, `game_server`, `game_script`）作为通信与安全底座，客户端基于 **Macroquad 3D** 编译为 **WebAssembly** 在浏览器或桌面独立运行，通过 WebSocket 实现跨平台低延迟全双工通信。
 
 ---
 
@@ -14,16 +14,17 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 2. **个性化状态视口，非多人同屏 (Not Shared Screen)**：
    - 每个玩家拥有独立的本地第三人称摄像机与专属状态（生命值、坐标、积分、个人日志）。
    - **25m 空间距离裁剪**：Scheme 依据玩家坐标动态计算视口切片，仅下发视野范围内的实体；进入视野的其他玩家会动态投影为带有对应代号标签的 3D 化身，视距外自动隐去。
-3. **单实例多租户 Scheme 运行态 (Shared Scheme World)**：
+3. **单实例多租户 Scheme 运行态 (Scheme-Authoritative World)**：
    - 服务端启动时指定一个 `.scm` 脚本（如 `space_arena.scm` 或 `dungeon.scm`），全局初始化唯一一个 Scheme 虚拟机实例，所有在线玩家共享同一个游戏世界上下文。
 4. **混合通信与字符串命令管道 (Dual Input Pipeline)**：
    - 客户端除了捕获键盘 WASD 和鼠标视角移动外，按 `Enter` 键即可唤起赛博命令行输入栏。
    - 用户输入的任意字符串（如 `heal`、`tp 10 10`、`say Hello`、`spawn cube tower`）原样传输至服务端，由 Scheme 解析执行并返回执行结果。
-5. **内置三端口开箱即用 (Zero-Config Hosting)**：
-   - 服务端单命令启动时自动监听：
-     - `HTTP 8087`：内置轻量异步静态 Web 服务器，托管 WebAssembly 资产（支持 WASM 流式加载）。
-     - `WebSocket 8089`：quad-net WebAssembly 实时网络通信通道。
-     - `TCP 8088`：quad-net 原生桌面客户端直连通道。
+5. **单端口一体化网关 (Single-Port Gateway)**：
+   - 基于 `game_server` 构建统一 Axum 网关，单个端口同时托管 WebAssembly 前端静态资产与全双工 WebSocket 端点（`/ws`），注入 `COOP/COEP` 高性能隔离安全头，免去多端口与跨域困扰。
+6. **高频锁存流水线与看门狗保护 (Latest-Only Latch & Watchdog)**：
+   - 移动操作通过 `game_net::ClientEnvelope` 接入服务端的 **Latest-Only Latch**，每帧只保留最新输入，杜绝操作堆积迟滞。
+   - 集成 `game_script` 的 100ms 看门狗安全求值，防止终端死循环脚本导致服务端挂起。
+   - 支持心跳保活与 60s 断线优雅重连恢复（Grace Period）。
 
 ---
 
@@ -35,44 +36,25 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/LispCraft.git
+git clone https://github.com/ouut/LispCraft.git
 cd LispCraft
 
-# 启动服务端 (加载默认太空竞技场模式，默认 HTTP 端口 8087)
+# 启动服务端 (加载默认太空竞技场模式，默认端口 8080)
 cargo run --release --bin server games/space_arena.scm
 ```
 
 服务就绪后，在现代浏览器中打开一个或多个标签页访问：
-👉 **`http://localhost:8087`**
+👉 **`http://localhost:8080`**
 
 立即即可体验多玩家各自独立视角的 3D 联机环境！
 
 ### 2. 如何指定自定义端口 (Port Configuration)
 
-系统支持通过 **位置参数**、**命令行选项参数** 或 **环境变量** 自由指定端口（优先级：命令行参数 > 位置参数 > 环境变量 > 默认值）：
+系统支持通过 **环境变量** 自由指定网关监听端口（默认 8080）：
 
-#### 方式 A：位置参数 (最简便)
 ```bash
-# 第二个参数直接指定 HTTP 端口 (例如指定 9090)
-cargo run --release --bin server games/space_arena.scm 9090
-```
-
-#### 方式 B：CLI 命令行选项参数
-```bash
-# 查看完整帮助说明
-cargo run --release --bin server -- --help
-
-# 显式指定 HTTP 端口、TCP 端口和 WebSocket 端口
-cargo run --release --bin server -- games/space_arena.scm --http-port 8087 --tcp-port 8088 --ws-port 8089
-
-# 也可以简写 -p 指定 HTTP 端口
-cargo run --release --bin server -- -p 9090
-```
-
-#### 方式 C：环境变量 (Docker / 容器化环境推荐)
-```bash
-# 通过环境变量指定
-HTTP_PORT=8087 TCP_PORT=8088 WS_PORT=8089 cargo run --release --bin server games/space_arena.scm
+# 通过 PORT 或 HTTP_PORT 指定自定义端口 (如 8087)
+PORT=8087 cargo run --release --bin server games/space_arena.scm
 ```
 
 ### 3. 桌面原生客户端启动
@@ -80,11 +62,16 @@ HTTP_PORT=8087 TCP_PORT=8088 WS_PORT=8089 cargo run --release --bin server games
 服务端保持运行的前提下，可以在本地终端直接启动桌面原生窗口客户端：
 
 ```bash
+# 直连本地默认端口
 cargo run --release --bin client
-```
-桌面客户端将自动通过 TCP (`127.0.0.1:8088`) 直连服务端，与网页端玩家无缝互通同服竞技。
 
-### 3. 一键切换游戏世界
+# 或指定远程服务端地址
+cargo run --release --bin client -- ws://127.0.0.1:8080/ws
+```
+
+桌面客户端与网页端玩家完全互通同服竞技。
+
+### 4. 一键切换游戏世界
 
 服务端可在启动时指定任意 Scheme 脚本，瞬间切换至不同的游戏规则与世界布局：
 
@@ -132,17 +119,19 @@ LispCraft/
 ├── .github/workflows/
 │   └── release.yml             # 跨平台 (Win/Mac ARM64/Linux) 编译与自动发布流水线
 ├── Cargo.toml                  # Cargo 工作区定义
+├── docs/                       # 跨游戏通用架构与移植指南
+│   ├── CROSS_GAME_PORTING.md   # 三款游戏 Layer 0 通用底座架构规范
+│   └── PORTING_TO_LISPCRAFT.md # LispCraft 落地网络与脚本底座实战全解析
 ├── shared/                     # 客户端与服务端共用的通信协议与 DTO
 │   ├── Cargo.toml
 │   └── src/lib.rs              # ClientMsg, ServerMsg, ClientState, EntityDesc
-├── server/                     # 服务端核心 (Rust + Steel Scheme)
+├── server/                     # 服务端核心 (Rust + Steel Scheme + game_server)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs             # 三端口启动调度与网络 Tick 主循环
-│       ├── http_server.rs      # 内置零依赖异步多线程静态 Web 服务 (默认 8087)
-│       ├── hub.rs              # 全服广播与定向会话路由消息中枢
-│       └── scheme_game.rs      # Steel Scheme 虚拟机高级绑定与原生调用加速
-├── client/                     # 3D 客户端 (Macroquad 3D + quad-net)
+│       ├── main.rs             # 单端口一体化网关、会话事件中枢与 20 TPS 仿真主循环
+│       ├── net_bridge.rs       # 协议映射层 (PlayerId 双射、移动锁存、命令队列转换)
+│       └── scheme_game.rs      # Steel Scheme 虚拟机绑定与 safe_eval / tick 执行
+├── client/                     # 3D 客户端 (Macroquad 3D + game_net 双模解码)
 │   ├── Cargo.toml
 │   └── src/main.rs             # 平滑追随相机、战术雷达、3D投影标牌、控制台
 ├── games/                      # Scheme 编写的游戏规则包
@@ -155,7 +144,8 @@ LispCraft/
 │   ├── quad-net.js             # quad-net WebSocket 运行时插件
 │   └── client.wasm             # 预编译生成的 WebAssembly 二进制
 └── tests/
-    └── e2e_multiplayer_test.py # 端到端多客户端并发仿真自动化测试套件
+    ├── e2e_multiplayer_test.py # 19 项端到端多客户端并发仿真自动化验收测试套件
+    └── scheme_test.rs          # Scheme 虚拟机全生命周期单测
 ```
 
 ---
@@ -174,8 +164,8 @@ LispCraft/
 只需在本地推送版本 Tag，GitHub Actions 将全自动并行编译三端二进制与 WebAssembly 包，并自动打包为包含 `server`、`client`、`games/`、`web/` 的便携安装包发布至 GitHub Releases 页面：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Release 页面将自动生成并附加：

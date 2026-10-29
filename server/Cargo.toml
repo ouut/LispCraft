@@ -9,9 +9,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 shared = { path = "../shared" }
-game_net = { path = "../../2d_minecraft/crates/game_net" }
-game_server = { path = "../../2d_minecraft/crates/game_server" }
-game_script = { path = "../../2d_minecraft/crates/game_script" }
+game_net = { git = "https://github.com/ouut/2d_minecraft.git", package = "game_net" }
+game_server = { git = "https://github.com/ouut/2d_minecraft.git", package = "game_server" }
+game_script = { git = "https://github.com/ouut/2d_minecraft.git", package = "game_script" }
 
 [dev-dependencies]
 tokio-tungstenite = "0.24"

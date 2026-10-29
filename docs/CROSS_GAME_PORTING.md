@@ -2,10 +2,10 @@
 
 本文档是跨三款游戏（`2d_minecraft`、`LispCraft`、`NoCraft`）的通用网络底座移植与复用总目录。
 
-目前通用协议、会话网关与脚本插件底座均已实现标准化解耦：
-- **`game_net` (`v0.1.0`)**：[crates.io/crates/game_net](https://crates.io/crates/game_net)（跨游戏通用协议信封与双模自适应编解码）
-- **`game_server` (`v0.1.0`)**：[crates.io/crates/game_server](https://crates.io/crates/game_server)（Axum HTTP WASM 托管、WebSocket、看门狗会话与输入流水线）
-- **`game_script` (`v0.1.0`)**：通用双层插件架构 Scheme 脚本引擎（`ScriptPlugin`、`CommandSink`、Watchdog 超时看门狗与热重载）
+目前通用协议、会话网关与脚本插件底座均已升级至 **`v0.2.0`** 并完成工程化验证：
+- **`game_net` (`v0.2.0`)**：跨游戏通用协议信封（`ClientEnvelope` / `ServerEnvelope`）、双模自适应编解码（JSON 文本调试 + Postcard 二进制压缩）。
+- **`game_server` (`v0.2.0`)**：Axum 单端口 HTTP WASM 托管（COOP/COEP）、WebSocket 自动协议协商、SessionManager 会话看门狗与高频移动 Latest-Only Latch 流水线。
+- **`game_script` (`v0.2.0`)**：双范式 Scheme 脚本引擎（既支持 Bevy 风格 `ScriptPlugin` + `CommandSink`，也支持 Scheme-Authoritative 状态机的看门狗安全求值 `safe_eval` 与 `safe_call_function`）。
 
 ---
 
@@ -13,11 +13,12 @@
 
 针对各个游戏的负责 Agent，已分别编写了定制化的移植指南：
 
-1. **LispCraft Agent 指南**：👉 [`docs/PORTING_TO_LISPCRAFT.md`](file:///workspace/2d_minecraft/docs/PORTING_TO_LISPCRAFT.md)
+1. **LispCraft Agent 实战指南**：👉 [`docs/PORTING_TO_LISPCRAFT.md`](file:///workspace/LispCraft/docs/PORTING_TO_LISPCRAFT.md)
    - 网络信封与 `shared/src/lib.rs`（`ClientMsg`, `ClientState`, `EntityDesc`）的映射接入。
-   - `ScriptPlugin` 插件改造：将 `server/src/scheme_game.rs` 改造为标准 `LispCraftPlugin`，统一接入 `CommandSink` 与看门狗保护。
+   - `PlayerId(u64) <-> "player_{id}"(String)` 双射转换与个性化视口距离裁剪单播（>25m 空间裁剪）。
+   - 单端口一体化网关与 19 项端到端多客户端并发自动化测试（100% 通过）。
 
-2. **NoCraft Agent 指南**：👉 [`docs/PORTING_TO_NOCRAFT.md`](file:///workspace/2d_minecraft/docs/PORTING_TO_NOCRAFT.md)
+2. **NoCraft Agent 指南**：👉 `docs/PORTING_TO_NOCRAFT.md`
    - 网络信封与 `engine-protocol`（`PlayerInput`, `ViewportSnapshot`）的映射接入。
    - `ScriptPlugin` 插件改造：将 `crates/engine-logic` 迁移至 `game_script`，直接复用标准的 `SteelVal <-> JSON` 互转与 `safe_eval`。
 
@@ -27,15 +28,15 @@
 
 ```mermaid
 flowchart TD
-    subgraph CommonEngine["公共底座 (通用 Layer 0)"]
-        Net["game_net = 0.1.0<br/>• ClientEnvelope&lt;TInput, TCmd&gt;<br/>• ServerEnvelope&lt;TSnapshot, TEvent&gt;<br/>• DualCodec (JSON &amp; Postcard 双模)"]
-        Server["game_server = 0.1.0<br/>• Axum HTTP + WASM/静态托管 (COOP/COEP)<br/>• WebSocket 自动协议协商<br/>• SessionManager (Token/看门狗/Grace重连)<br/>• Latest-Only Latch + FIFO Queue"]
-        Script["game_script = 0.1.0<br/>• ScriptPlugin Trait (Bevy 风格装配)<br/>• CommandSink (无锁事务指令总线)<br/>• safe_eval (Watchdog 超时防死循环)<br/>• SteelVal &lt;-&gt; JSON 互转网桥"]
+    subgraph CommonEngine["公共底座 (通用 Layer 0 v0.2.0)"]
+        Net["game_net = 0.2.0<br/>• ClientEnvelope&lt;TInput, TCmd&gt;<br/>• ServerEnvelope&lt;TSnapshot, TEvent&gt;<br/>• DualCodec (JSON &amp; Postcard 双模)"]
+        Server["game_server = 0.2.0<br/>• Axum HTTP + WASM/静态托管 (COOP/COEP)<br/>• WebSocket 自动协议协商 (/ws)<br/>• SessionManager (Token/看门狗/Grace重连)<br/>• Latest-Only Latch + FIFO Queue"]
+        Script["game_script = 0.2.0<br/>• 双范式支持 (ECS CommandSink &amp; Scheme-Authoritative)<br/>• safe_eval / safe_call_function (Watchdog 看门狗防死循环)<br/>• SteelVal &lt;-&gt; JSON 互转网桥"]
     end
 
     subgraph Adapters["游戏接入适配层 (业务插件与协议映射)"]
         MC["2d_minecraft<br/>• VoxelPlugin<br/>• TInput = PlayerMoveIntent<br/>• TCmd = EngineCommand"]
-        LC["LispCraft<br/>• LispCraftGamePlugin<br/>• TInput = LispMotionInput<br/>• TCmd = LispGameCommand"]
+        LC["LispCraft (v0.2.0)<br/>• net_bridge (PlayerId 双射)<br/>• TInput = LispMotionInput<br/>• TCmd = LispGameCommand<br/>• 视口距离裁剪单播"]
         NC["NoCraft<br/>• GridLogicPlugin<br/>• TInput = PlayerInput<br/>• TCmd = NoCraftCommand"]
     end
 
@@ -50,52 +51,34 @@ flowchart TD
 
 ---
 
-## 3. 通用插件式脚本引擎 (`game_script`) 接入范式
+## 3. 两种主流脚本驱动范式在 `game_script` 中的落地
 
-任何游戏只需编写一个 `ScriptPlugin` 即可安全注入自定义 Scheme 原语，并通过 `CommandSink` 无锁发射指令，游戏循环在每 Tick 统一消费：
+### 范式 A：ECS 插件与无锁事务指令总线 (如 `2d_minecraft`)
+适合 Rust ECS 主导世界状态的游戏。Scheme 作为扩展插件，向 `CommandSink` 发射强类型指令：
 
 ```rust
-use game_script::{ScriptApp, ScriptPlugin, PluginContext, PluginError, AnyCommand};
-
-// 1. 定义游戏的强类型指令
-#[derive(Debug)]
-pub struct SpawnEntityCommand { pub entity_type: String, pub x: f64, pub y: f64 }
-impl AnyCommand for SpawnEntityCommand {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-}
-
-// 2. 实现游戏特异业务插件
 pub struct GameLogicPlugin;
 impl ScriptPlugin for GameLogicPlugin {
     fn name(&self) -> &'static str { "game_logic" }
 
     fn build(&self, ctx: &mut PluginContext) -> Result<(), PluginError> {
         let sink = ctx.command_sink.clone();
-        
-        // 向 Scheme VM 注册原生函数，内部发射事务指令，绝不产生锁冲突
         ctx.engine.register_fn("spawn-unit!", move |name: String, x: f64, y: f64| {
             sink.emit(SpawnEntityCommand { entity_type: name, x, y });
         });
         Ok(())
     }
 }
+```
 
-// 3. 宿主装配与主循环消费
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut app = ScriptApp::new();
-    app.add_plugin(GameLogicPlugin)?;
-    app.watch_directory("scripts/");
+### 范式 B：Scheme 完全主导世界状态机 (如 `LispCraft`)
+适合纯动态语言驱动的世界。整个游戏世界实体、物理碰撞、距离裁剪完全由 Scheme 虚拟机承载，Rust 作为安全 Host 通过 100ms 看门狗驱动：
 
-    // 安全求值（带 100ms 超时看门狗，防死循环）
-    app.safe_eval("(spawn-unit! \"goblin\" 10.0 20.0)", 100)?;
+```rust
+// 1. 安全求值 (带 100ms 超时看门狗，防终端用户死循环卡死服)
+let echo = scheme_app.safe_eval("(heal-player! id)", 100)?;
 
-    // 游戏主循环每 Tick 批量拉取指令
-    let commands = app.drain_commands();
-    for cmd in commands {
-        if let Some(spawn) = cmd.as_any().downcast_ref::<SpawnEntityCommand>() {
-            println!("Spawned: {:?}", spawn);
-        }
-    }
-    Ok(())
-}
+// 2. 原生函数高效调用与单播视口裁剪
+let snapshot = scheme_game.get_client_state(&player_name);
+server.send_to(player_id, ServerEnvelope::Snapshot(snapshot));
 ```
