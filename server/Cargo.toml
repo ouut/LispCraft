@@ -5,8 +5,14 @@ edition = "2021"
 
 [dependencies]
 steel-core = { version = "0.8.3", features = ["sync"] }
-quad-net = "0.1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
 shared = { path = "../shared" }
-tiny_http = "0.12"
+game_net = { path = "../../2d_minecraft/crates/game_net" }
+game_server = { path = "../../2d_minecraft/crates/game_server" }
+game_script = { path = "../../2d_minecraft/crates/game_script" }
+
+[dev-dependencies]
+tokio-tungstenite = "0.24"
+futures-util = "0.3"

@@ -1,335 +1,196 @@
-mod http_server;
-mod hub;
-mod scheme_game;
+pub mod net_bridge;
+pub mod scheme_game;
 
-use std::env;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use http_server::{find_web_dir, start_http_server};
-use hub::MessageHub;
+use game_net::ServerEnvelope;
+use game_server::{
+    start_server, ServerConfig, ServerHandle, SessionEvent, StaticAssetSource,
+};
+use shared::ClientState;
+
+use net_bridge::{
+    player_id_to_name, LispEvent, LispGameCommand, LispMotionInput,
+};
 use scheme_game::SchemeGame;
 
-use quad_net::quad_socket::server::{listen, Settings, SocketHandle};
-use shared::{ClientMsg, ServerMsg};
-
-#[derive(Default)]
-struct ClientSession {
-    id: Mutex<Option<String>>,
+pub fn find_web_dir() -> PathBuf {
+    let candidates = [
+        PathBuf::from("web"),
+        PathBuf::from("../web"),
+        PathBuf::from("/workspace/LispCraft/web"),
+    ];
+    for c in &candidates {
+        if c.exists() && c.is_dir() {
+            return c.clone();
+        }
+    }
+    PathBuf::from("web")
 }
 
-impl ClientSession {
-    fn get_or_assign_id(
-        &self,
-        next_id: &AtomicUsize,
-        hub: &MessageHub,
-        game: &SchemeGame,
-        handle: &mut SocketHandle,
-    ) -> String {
-        let mut id_lock = self.id.lock().unwrap();
-        if let Some(ref existing) = *id_lock {
-            return existing.clone();
-        }
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let script_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "games/space_arena.scm".to_string());
 
-        let new_id = format!("player_{}", next_id.fetch_add(1, Ordering::SeqCst));
-        *id_lock = Some(new_id.clone());
+    let port: u16 = std::env::var("PORT")
+        .or_else(|_| std::env::var("HTTP_PORT"))
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8080);
 
-        hub.register(&new_id);
-        game.on_join(&new_id);
+    let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let web_dir = find_web_dir();
 
-        let active_count = hub.active_count();
-        println!(
-            "[Session] Client connected: {} (Active: {})",
-            new_id, active_count
-        );
-
-        // 下发欢迎包
-        let welcome = ServerMsg::Welcome {
-            client_id: new_id.clone(),
-        };
-        if let Ok(bytes) = serde_json::to_vec(&welcome) {
-            let _ = handle.send(&bytes);
-        }
-
-        // 全服通知有新玩家加入
-        hub.broadcast_except(
-            &new_id,
-            ServerMsg::CommandEcho {
-                success: true,
-                output: format!("[Broadcast] {} joined the world!", new_id),
-            },
-        );
-
-        new_id
-    }
-}
-
-fn print_usage(program: &str) {
     println!("====================================================");
-    println!("      LispCraft Game Server (Rust + Steel Scheme)   ");
+    println!("  LispCraft 3D Industrial Gateway Server (v0.2.0)");
     println!("====================================================");
-    println!("Usage: {} [GAME_SCRIPT] [HTTP_PORT] [OPTIONS]", program);
-    println!();
-    println!("Positional Arguments:");
-    println!("  GAME_SCRIPT                 Path to Scheme game script (default: games/space_arena.scm)");
-    println!("  HTTP_PORT                   Optional HTTP port (default: 8087)");
-    println!();
-    println!("Options:");
-    println!("  -p, --http-port <PORT>      HTTP Web server port (default: 8087, or env HTTP_PORT)");
-    println!("  --tcp-port <PORT>           TCP native port (default: 8088, or env TCP_PORT)");
-    println!("  --ws-port <PORT>            WebSocket port (default: 8089, or env WS_PORT)");
-    println!("  -h, --help                  Print help information");
-    println!();
-    println!("Examples:");
-    println!("  {} games/space_arena.scm", program);
-    println!("  {} games/space_arena.scm 8087", program);
-    println!("  {} --http-port 8087 --tcp-port 8088 --ws-port 8089", program);
-    println!("  HTTP_PORT=8087 {} games/dungeon.scm", program);
-}
+    println!(" Script:             {}", script_path);
+    println!(" Web Assets:         {}", web_dir.display());
+    println!(" Single-Port Gateway: http://127.0.0.1:{}/", port);
+    println!(" WebSocket Endpoint:  ws://127.0.0.1:{}/ws", port);
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        print_usage(&args[0]);
-        return;
-    }
+    // 1. 初始化 Scheme 游戏世界
+    let game = Arc::new(SchemeGame::new(&script_path)?);
 
-    let mut script_path = "games/space_arena.scm".to_string();
-    let mut http_port = std::env::var("HTTP_PORT").unwrap_or_else(|_| "8087".to_string());
-    let mut tcp_port = std::env::var("TCP_PORT").unwrap_or_else(|_| "8088".to_string());
-    let mut ws_port = std::env::var("WS_PORT").unwrap_or_else(|_| "8089".to_string());
+    // 2. 配置单端口网关
+    let config = ServerConfig::new(bind_addr)
+        .with_static_assets(StaticAssetSource::FileSystem(web_dir))
+        .with_heartbeat_timeout_secs(10)
+        .with_grace_period_secs(60);
 
-    let mut non_flag_args: Vec<String> = Vec::new();
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "-p" | "--http-port" => {
-                if i + 1 < args.len() {
-                    http_port = args[i + 1].clone();
-                    i += 1;
+    // 3. 启动通用游戏服务端
+    let server: ServerHandle<LispMotionInput, LispGameCommand, ClientState, LispEvent> =
+        start_server(config).await?;
+
+    println!(" Server bound to: {}", server.local_addr());
+    println!(" Ready for connections! Press Ctrl+C to exit.");
+
+    // 4. 20 TPS (50ms) 物理仿真与空间裁剪单播下发循环
+    let tick_duration = Duration::from_millis(50);
+    let mut last_tick_time = Instant::now();
+
+    loop {
+        let tick_start = Instant::now();
+        let dt = tick_start.duration_since(last_tick_time).as_secs_f32().min(0.1);
+        last_tick_time = tick_start;
+
+        // (a) 拉取会话生命周期事件 (玩家加入、重连、断开、注销)
+        for event in server.drain_session_events() {
+            match event {
+                SessionEvent::PlayerJoined { player_id, token } => {
+                    let player_name = player_id_to_name(player_id);
+                    println!(
+                        "[Session] PlayerJoined: {} (pid={}, token={})",
+                        player_name, player_id, token
+                    );
+                    game.on_join(&player_name);
+
+                    server.broadcast(ServerEnvelope::Event(LispEvent::ChatBroadcast {
+                        from: "System".to_string(),
+                        message: format!("{} joined the galaxy!", player_name),
+                    }));
+                }
+                SessionEvent::PlayerReconnected { player_id } => {
+                    let player_name = player_id_to_name(player_id);
+                    println!("[Session] PlayerReconnected: {} (pid={})", player_name, player_id);
+                }
+                SessionEvent::PlayerDisconnected { player_id, grace_period_secs } => {
+                    let player_name = player_id_to_name(player_id);
+                    println!(
+                        "[Session] PlayerDisconnected: {} (grace period {}s)",
+                        player_name, grace_period_secs
+                    );
+                }
+                SessionEvent::PlayerTerminated { player_id } => {
+                    let player_name = player_id_to_name(player_id);
+                    println!("[Session] PlayerTerminated: {}", player_name);
+                    game.on_leave(&player_name);
+
+                    server.broadcast(ServerEnvelope::Event(LispEvent::ChatBroadcast {
+                        from: "System".to_string(),
+                        message: format!("{} departed from the world.", player_name),
+                    }));
                 }
             }
-            "--tcp-port" => {
-                if i + 1 < args.len() {
-                    tcp_port = args[i + 1].clone();
-                    i += 1;
-                }
-            }
-            "--ws-port" => {
-                if i + 1 < args.len() {
-                    ws_port = args[i + 1].clone();
-                    i += 1;
-                }
-            }
-            other if !other.starts_with('-') => {
-                non_flag_args.push(other.to_string());
-            }
-            _ => {}
         }
-        i += 1;
-    }
 
-    if let Some(s) = non_flag_args.get(0) {
-        script_path = s.clone();
-    }
-    if let Some(p) = non_flag_args.get(1) {
-        if p.chars().all(|c| c.is_ascii_digit()) {
-            http_port = p.clone();
+        // (b) 拉取高频输入 (Latest-Only Latch)
+        for (player_id, input) in server.drain_inputs() {
+            let player_name = player_id_to_name(player_id);
+            if input.dx != 0.0 || input.dz != 0.0 {
+                game.on_move(&player_name, input.dx, input.dz, input.yaw);
+            }
         }
-    }
 
-    println!("====================================================");
-    println!("      LispCraft Game Server (Rust + Steel Scheme)   ");
-    println!("====================================================");
-    println!("Loading Scheme game definition from: {}", script_path);
-
-    let game = Arc::new(SchemeGame::new(&script_path).expect("Failed to initialize Scheme game"));
-    let hub = Arc::new(MessageHub::new());
-    let next_id = Arc::new(AtomicUsize::new(1));
-
-    // 1. 启动内置 HTTP 静态 Web 服务器 (默认 8087，支持参数及 HTTP_PORT 环境变量)
-    let web_root = find_web_dir();
-    let http_addr = format!("0.0.0.0:{}", http_port);
-    if let Err(e) = start_http_server(&http_addr, web_root) {
-        eprintln!("[HTTP Server Error] Failed to bind {}: {:?}", http_addr, e);
-    }
-
-    // 2. 启动物理与游戏逻辑 Tick 线程 (20 TPS, 50ms)
-    let tick_game = game.clone();
-    std::thread::Builder::new()
-        .name("logic-tick".to_string())
-        .spawn(move || loop {
-            let start = Instant::now();
-            tick_game.tick(0.05);
-            let elapsed = start.elapsed();
-            if elapsed > Duration::from_millis(5) {
-                eprintln!("[Tick Warning] Logic tick took {:?}", elapsed);
-            }
-            if elapsed < Duration::from_millis(50) {
-                std::thread::sleep(Duration::from_millis(50) - elapsed);
-            }
-        })
-        .expect("Failed to spawn logic tick thread");
-
-    // 3. 配置 quad-net 网络服务端 (TCP 8088 / WebSocket 8089)
-    let game_for_msg = game.clone();
-    let game_for_timer = game.clone();
-    let game_for_disc = game.clone();
-
-    let hub_for_msg = hub.clone();
-    let hub_for_timer = hub.clone();
-    let hub_for_disc = hub.clone();
-
-    let next_id_for_msg = next_id.clone();
-    let next_id_for_timer = next_id.clone();
-
-    let settings = Settings {
-        on_message: move |handle: &mut SocketHandle, session: &mut ClientSession, data: Vec<u8>| {
-            let client_id = session.get_or_assign_id(
-                &next_id_for_msg,
-                &hub_for_msg,
-                &game_for_msg,
-                handle,
-            );
-
-            if let Ok(msg) = serde_json::from_slice::<ClientMsg>(&data) {
-                match msg {
-                    ClientMsg::Move { dx, dz, yaw } => {
-                        game_for_msg.on_move(&client_id, dx, dz, yaw);
+        // (c) 拉取离散命令队列 (FIFO Queue)
+        for (player_id, commands) in server.drain_commands() {
+            let player_name = player_id_to_name(player_id);
+            for cmd in commands {
+                match cmd {
+                    LispGameCommand::Action { action_id } => {
+                        let echo = game.on_command(&player_name, &format!("action {}", action_id));
+                        server.send_to(
+                            player_id,
+                            ServerEnvelope::Event(LispEvent::CommandEcho {
+                                success: true,
+                                output: echo,
+                            }),
+                        );
                     }
-                    ClientMsg::Action { action_id: _ } => {}
-                    ClientMsg::Command(cmd) => {
-                        println!("[Server] Command from {}: '{}'", client_id, cmd);
+                    LispGameCommand::SchemeCommand(cmd_str) => {
+                        let echo = game.on_command(&player_name, &cmd_str);
 
                         // 广播指令：以 "say " 或 "all " 开头
-                        if let Some(content) = cmd.strip_prefix("say ").or_else(|| cmd.strip_prefix("all ")) {
-                            let broadcast_text = format!("{}: {}", client_id, content.trim());
-                            hub_for_msg.broadcast(ServerMsg::CommandEcho {
+                        if let Some(content) = cmd_str.strip_prefix("say ").or_else(|| cmd_str.strip_prefix("all ")) {
+                            let broadcast_text = format!("{}: {}", player_name, content.trim());
+                            server.broadcast(ServerEnvelope::Event(LispEvent::CommandEcho {
                                 success: true,
                                 output: broadcast_text,
-                            });
+                            }));
+                        } else {
+                            server.send_to(
+                                player_id,
+                                ServerEnvelope::Event(LispEvent::CommandEcho {
+                                    success: true,
+                                    output: echo,
+                                }),
+                            );
                         }
-                        // 在线玩家查询：list 或 who
-                        else if cmd == "list" || cmd == "who" {
-                            let players = hub_for_msg.active_players().join(", ");
-                            let echo = ServerMsg::CommandEcho {
-                                success: true,
-                                output: format!("Online players ({}): {}", hub_for_msg.active_count(), players),
-                            };
-                            if let Ok(bytes) = serde_json::to_vec(&echo) {
-                                let _ = handle.send(&bytes);
-                            }
-                        }
-                        // 私信指令：tell <target> <message>
-                        else if let Some(rest) = cmd.strip_prefix("tell ") {
-                            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-                            if parts.len() == 2 {
-                                let target = parts[0].trim();
-                                let whisper = parts[1].trim();
-                                hub_for_msg.send_to(
-                                    target,
-                                    ServerMsg::CommandEcho {
-                                        success: true,
-                                        output: format!("[Whisper from {}]: {}", client_id, whisper),
-                                    },
-                                );
-                                let _ = handle.send(
-                                    &serde_json::to_vec(&ServerMsg::CommandEcho {
-                                        success: true,
-                                        output: format!("[Whisper to {}]: {}", target, whisper),
-                                    })
-                                    .unwrap_or_default(),
-                                );
-                            } else {
-                                let _ = handle.send(
-                                    &serde_json::to_vec(&ServerMsg::CommandEcho {
-                                        success: false,
-                                        output: "Usage: tell <target_id> <message>".to_string(),
-                                    })
-                                    .unwrap_or_default(),
-                                );
-                            }
-                        }
-                        // 其他游戏逻辑/管理命令，交由 Scheme 执行
-                        else {
-                            let result = game_for_msg.on_command(&client_id, &cmd);
-                            let echo = ServerMsg::CommandEcho {
-                                success: true,
-                                output: result,
-                            };
-                            if let Ok(bytes) = serde_json::to_vec(&echo) {
-                                let _ = handle.send(&bytes);
-                            }
 
-                            // 如果是生成实体的命令，向其他玩家同步广播提示
-                            if cmd.starts_with("spawn ") {
-                                hub_for_msg.broadcast_except(
-                                    &client_id,
-                                    ServerMsg::CommandEcho {
-                                        success: true,
-                                        output: format!("[World] {} spawned an entity!", client_id),
-                                    },
-                                );
-                            }
+                        if cmd_str.starts_with("spawn ") {
+                            server.broadcast(ServerEnvelope::Event(LispEvent::CommandEcho {
+                                success: true,
+                                output: format!("[World] {} spawned an entity!", player_name),
+                            }));
                         }
                     }
                 }
             }
-        },
-        on_timer: move |handle: &mut SocketHandle, session: &ClientSession| {
-            // 获取或自动分配新连接客户端 ID
-            let client_id = session.get_or_assign_id(
-                &next_id_for_timer,
-                &hub_for_timer,
-                &game_for_timer,
-                handle,
-            );
+        }
 
-            // 1. 投递待发送的私信与广播包
-            for msg in hub_for_timer.drain(&client_id) {
-                if let Ok(bytes) = serde_json::to_vec(&msg) {
-                    let _ = handle.send(&bytes);
-                }
+        // (d) 驱动 Scheme 物理仿真
+        game.tick(dt);
+
+        // (e) 针对每个玩家的 25m 裁剪视口，通过 server.send_to 单播下发 Snapshot
+        let active_pids = server.session_manager().all_active_player_ids();
+        for pid in active_pids {
+            let player_name = player_id_to_name(pid);
+            if let Some(state) = game.get_client_state(&player_name) {
+                server.send_to(pid, ServerEnvelope::Snapshot(state));
             }
+        }
 
-            // 2. 状态包定时同步 (~25 TPS)
-            let json_str = game_for_timer.get_client_state_json(&client_id);
-            if !json_str.is_empty() && json_str != "{}" {
-                let _ = handle.send(json_str.as_bytes());
-            }
-        },
-        on_disconnect: move |session: &ClientSession| {
-            if let Some(client_id) = session.id.lock().unwrap().take() {
-                hub_for_disc.unregister(&client_id);
-                game_for_disc.on_leave(&client_id);
-
-                let remaining = hub_for_disc.active_count();
-                println!(
-                    "[Session] Client disconnected: {} (Active: {})",
-                    client_id, remaining
-                );
-
-                hub_for_disc.broadcast(ServerMsg::CommandEcho {
-                    success: true,
-                    output: format!("[Broadcast] {} left the world.", client_id),
-                });
-            }
-        },
-        timer: Some(Duration::from_millis(40)), // ~25 TPS 状态同步
-        _marker: std::marker::PhantomData,
-    };
-
-    let tcp_addr = format!("0.0.0.0:{}", tcp_port);
-    let ws_addr = format!("0.0.0.0:{}", ws_port);
-    println!(
-        "[Server] Listening on TCP: {} (Native) & WebSocket: {} (WASM)",
-        tcp_addr, ws_addr
-    );
-    println!("====================================================");
-    println!("Ready for connections! Press Ctrl+C to exit.");
-
-    listen(tcp_addr, ws_addr, settings);
+        // (f) 保持 20 TPS 周期
+        let elapsed = tick_start.elapsed();
+        if elapsed < tick_duration {
+            tokio::time::sleep(tick_duration - elapsed).await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -337,38 +198,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_message_hub() {
-        let hub = MessageHub::new();
-        hub.register("p1");
-        hub.register("p2");
-        assert_eq!(hub.active_count(), 2);
-
-        // 私信测试
-        hub.send_to(
-            "p1",
-            ServerMsg::CommandEcho {
-                success: true,
-                output: "hello p1".to_string(),
-            },
-        );
-        let p1_msgs = hub.drain("p1");
-        assert_eq!(p1_msgs.len(), 1);
-        assert!(hub.drain("p1").is_empty());
-
-        // 广播测试
-        hub.broadcast(ServerMsg::CommandEcho {
-            success: true,
-            output: "all".to_string(),
-        });
-        assert_eq!(hub.drain("p1").len(), 1);
-        assert_eq!(hub.drain("p2").len(), 1);
-
-        hub.unregister("p1");
-        assert_eq!(hub.active_count(), 1);
+    fn test_web_dir_finder() {
+        let dir = find_web_dir();
+        assert!(dir.exists(), "Web dir should exist");
     }
 
     #[test]
-    fn test_scheme_game() {
+    fn test_scheme_game_lifecycle() {
         let game = SchemeGame::new("games/space_arena.scm").expect("Failed to initialize game");
         game.on_join("tester_1");
         game.on_move("tester_1", 1.0, 0.0, 0.0);
@@ -389,10 +225,13 @@ mod tests {
     }
 
     #[test]
-    fn test_mime_types() {
-        use std::path::Path;
-        assert_eq!(http_server::mime_type_for_path(Path::new("client.wasm")), "application/wasm");
-        assert_eq!(http_server::mime_type_for_path(Path::new("gl.js")), "application/javascript");
-        assert_eq!(http_server::mime_type_for_path(Path::new("index.html")), "text/html; charset=utf-8");
+    fn test_scheme_game_eval_and_precompiled_tick() {
+        let game = SchemeGame::new("games/space_arena.scm").expect("Failed to initialize game");
+        // Test high-frequency tick directly executing safe_call_function
+        game.tick(0.05);
+
+        // Test safe_eval for Scheme expressions
+        let eval_res = game.safe_eval("(+ 10 20)", 100).expect("Eval failed");
+        assert!(eval_res.contains("30"));
     }
 }

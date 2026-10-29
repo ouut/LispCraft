@@ -1,6 +1,9 @@
 use macroquad::prelude::*;
 use quad_net::web_socket::WebSocket;
-use shared::{ClientMsg, ClientState, ServerMsg};
+use shared::{
+    ClientEnvelope, ClientState, LispEvent, LispGameCommand, LispMotionInput,
+    ServerEnvelope, ServerMsg,
+};
 use std::collections::HashSet;
 
 /// 生产级全平台通用 WebSocket 套接字封装 (消除 255 字节 TCP 限制并统一双端协议)
@@ -87,33 +90,50 @@ fn add_log(logs: &mut Vec<LogEntry>, text: String, color: Color) {
 
 #[macroquad::main("LispCraft 3D")]
 async fn main() {
-    let ws_port = std::env::var("WS_PORT").unwrap_or_else(|_| "8089".to_string());
+    let ws_port = std::env::var("PORT")
+        .or_else(|_| std::env::var("WS_PORT"))
+        .unwrap_or_else(|_| "8080".to_string());
     #[cfg(not(target_arch = "wasm32"))]
     let server_addr = {
-        let mut addr = format!("ws://127.0.0.1:{}", ws_port);
+        let mut addr = format!("ws://127.0.0.1:{}/ws", ws_port);
         if let Some(arg) = std::env::args().nth(1) {
             if arg.starts_with("ws://") || arg.starts_with("wss://") {
-                addr = arg;
+                addr = if arg.ends_with("/ws") {
+                    arg
+                } else {
+                    format!("{}/ws", arg.trim_end_matches('/'))
+                };
             } else if arg.contains(':') {
-                addr = format!("ws://{}", arg);
+                addr = format!("ws://{}/ws", arg.trim_end_matches('/'));
             } else {
-                addr = format!("ws://{}:{}", arg, ws_port);
+                addr = format!("ws://{}:{}/ws", arg, ws_port);
             }
         }
         addr
     };
     #[cfg(target_arch = "wasm32")]
-    let server_addr = format!("ws://127.0.0.1:{}", ws_port);
+    let server_addr = format!("ws://127.0.0.1:{}/ws", ws_port);
 
     println!("[Client] Connecting to {}", server_addr);
     let mut socket = match GameSocket::connect(&server_addr) {
-        Ok(s) => Some(s),
+        Ok(mut s) => {
+            // 连接首包发送 ClientEnvelope::Auth
+            let auth_env: ClientEnvelope<LispMotionInput, LispGameCommand> = ClientEnvelope::Auth {
+                token: format!("token_{}", (get_time() * 1000.0) as u64),
+                client_version: "0.2.0".to_string(),
+            };
+            if let Ok(bytes) = serde_json::to_vec(&auth_env) {
+                s.send(&bytes);
+            }
+            Some(s)
+        }
         Err(e) => {
             eprintln!("[Client] Connect error: {}", e);
             None
         }
     };
     let mut last_reconnect_time = 0.0_f32;
+    let mut last_ping_time = 0.0_f32;
 
     let mut current_state: Option<ClientState> = None;
     let mut command_input = String::new();
@@ -151,7 +171,15 @@ async fn main() {
         // 自动重连机制：若尚未连接服务端，每隔 2 秒尝试重新连接
         if socket.is_none() && time - last_reconnect_time > 2.0 {
             last_reconnect_time = time;
-            if let Ok(s) = GameSocket::connect(&server_addr) {
+            if let Ok(mut s) = GameSocket::connect(&server_addr) {
+                // 连接首包发送 ClientEnvelope::Auth
+                let auth_env: ClientEnvelope<LispMotionInput, LispGameCommand> = ClientEnvelope::Auth {
+                    token: format!("token_{}", (get_time() * 1000.0) as u64),
+                    client_version: "0.2.0".to_string(),
+                };
+                if let Ok(bytes) = serde_json::to_vec(&auth_env) {
+                    s.send(&bytes);
+                }
                 add_log(
                     &mut message_logs,
                     format!("[NET] Connected to Scheme Game Server ({})", server_addr),
@@ -161,11 +189,92 @@ async fn main() {
             }
         }
 
+        // 后台 3 秒 ClientEnvelope::Ping 心跳保活
+        if time - last_ping_time >= 3.0 {
+            last_ping_time = time;
+            if let Some(ref mut sock) = socket {
+                let client_time_ms = (get_time() * 1000.0) as u64;
+                let ping_env: ClientEnvelope<LispMotionInput, LispGameCommand> = ClientEnvelope::Ping { client_time_ms };
+                if let Ok(bytes) = serde_json::to_vec(&ping_env) {
+                    sock.send(&bytes);
+                }
+            }
+        }
+
         // --- 1. 网络收包与状态同步 ---
         if let Some(ref mut sock) = socket {
             while let Some(bytes) = sock.try_recv() {
-                if let Ok(state) = serde_json::from_slice::<ClientState>(&bytes) {
-                    // 同步来自服务端的最新日志
+                if let Ok(envelope) = serde_json::from_slice::<ServerEnvelope<ClientState, LispEvent>>(&bytes) {
+                    match envelope {
+                        ServerEnvelope::AuthSuccess { player_id, server_tick } => {
+                            let client_id = format!("player_{}", player_id);
+                            println!("[Client] AuthSuccess: joined world as {} (tick {})", client_id, server_tick);
+                            add_log(
+                                &mut message_logs,
+                                format!("[SYS] Welcome Commander {}! (Server Tick {})", client_id, server_tick),
+                                Color::new(0.2, 0.95, 0.6, 1.0),
+                            );
+                        }
+                        ServerEnvelope::Snapshot(state) => {
+                            for log in &state.logs {
+                                if !known_server_logs.contains(log) {
+                                    known_server_logs.insert(log.clone());
+                                    add_log(
+                                        &mut message_logs,
+                                        format!("[NET] {}", log),
+                                        Color::new(0.9, 0.8, 0.3, 1.0),
+                                    );
+                                }
+                            }
+                            current_state = Some(state);
+                        }
+                        ServerEnvelope::Event(evt) => {
+                            match evt {
+                                LispEvent::CommandEcho { success, output } => {
+                                    let col = if success {
+                                        Color::new(0.25, 0.95, 0.5, 1.0)
+                                    } else {
+                                        Color::new(1.0, 0.35, 0.35, 1.0)
+                                    };
+                                    add_log(&mut message_logs, format!("[ECHO] {}", output), col);
+                                }
+                                LispEvent::ChatBroadcast { from, message } => {
+                                    add_log(
+                                        &mut message_logs,
+                                        format!("[{}] {}", from, message),
+                                        Color::new(0.3, 0.85, 1.0, 1.0),
+                                    );
+                                }
+                                LispEvent::SystemNotice(notice) => {
+                                    add_log(
+                                        &mut message_logs,
+                                        format!("[SYS] {}", notice),
+                                        Color::new(1.0, 0.85, 0.2, 1.0),
+                                    );
+                                }
+                            }
+                        }
+                        ServerEnvelope::Pong { client_time_ms, .. } => {
+                            let now_ms = (get_time() * 1000.0) as u64;
+                            let _rtt = now_ms.saturating_sub(client_time_ms);
+                        }
+                        ServerEnvelope::AuthFailed { reason } => {
+                            add_log(
+                                &mut message_logs,
+                                format!("[AUTH FAILED] {}", reason),
+                                Color::new(1.0, 0.3, 0.3, 1.0),
+                            );
+                        }
+                        ServerEnvelope::Kick { reason } => {
+                            add_log(
+                                &mut message_logs,
+                                format!("[KICK] Disconnected by server: {}", reason),
+                                Color::new(1.0, 0.2, 0.2, 1.0),
+                            );
+                        }
+                    }
+                } else if let Ok(state) = serde_json::from_slice::<ClientState>(&bytes) {
+                    // 兼容裸 ClientState 同步
                     for log in &state.logs {
                         if !known_server_logs.contains(log) {
                             known_server_logs.insert(log.clone());
@@ -178,6 +287,7 @@ async fn main() {
                     }
                     current_state = Some(state);
                 } else if let Ok(srv_msg) = serde_json::from_slice::<ServerMsg>(&bytes) {
+                    // 兼容旧版 ServerMsg
                     match srv_msg {
                         ServerMsg::Welcome { client_id } => {
                             println!("[Client] Joined world as {}", client_id);
@@ -253,8 +363,9 @@ async fn main() {
                     history_index = None;
 
                     if let Some(ref mut sock) = socket {
-                        let msg = ClientMsg::Command(trimmed.clone());
-                        if let Ok(bytes) = serde_json::to_vec(&msg) {
+                        let cmd_env: ClientEnvelope<LispMotionInput, LispGameCommand> =
+                            ClientEnvelope::Command(LispGameCommand::SchemeCommand(trimmed.clone()));
+                        if let Ok(bytes) = serde_json::to_vec(&cmd_env) {
                             sock.send(&bytes);
                         }
                     }
@@ -349,12 +460,13 @@ async fn main() {
             if move_input.length_squared() > 0.001 {
                 let norm = move_input.normalize();
                 if let Some(ref mut sock) = socket {
-                    let msg = ClientMsg::Move {
-                        dx: norm.x,
-                        dz: norm.y,
-                        yaw: camera_yaw,
-                    };
-                    if let Ok(bytes) = serde_json::to_vec(&msg) {
+                    let input_env: ClientEnvelope<LispMotionInput, LispGameCommand> =
+                        ClientEnvelope::Input(LispMotionInput {
+                            dx: norm.x,
+                            dz: norm.y,
+                            yaw: camera_yaw,
+                        });
+                    if let Ok(bytes) = serde_json::to_vec(&input_env) {
                         sock.send(&bytes);
                     }
                 }
