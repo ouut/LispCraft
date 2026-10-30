@@ -191,6 +191,30 @@ cargo run --bin client games/space_arena/client
 
 ---
 
+## 🛠️ 本地一键构建与打包脚本 (`build.sh`)
+
+项目提供了对齐 GitHub Actions 流水线的本地自动化构建脚本 [`build.sh`](file:///workspace/LispCraft/build.sh)，自动探测当前操作系统 (Linux / macOS / Windows)、硬件架构 (x86_64 / arm64) 与 Rust 工具链，自动安装 wasm32 目标并打包发布归档：
+
+```bash
+# 1. 标准一键构建与打包 (编译 WASM 前端 + 原生 server/client + 打包至 dist/)
+./build.sh
+
+# 2. 构建前运行全部测试 (包含 60 项工作区单测 + 19 项 Python E2E 多人集成测试)
+./build.sh --test
+
+# 3. 极速仅构建原生二进制 (跳过 WASM 前端构建)
+./build.sh --skip-wasm
+
+# 4. 清理缓存全量重构
+./build.sh --clean
+```
+
+构建成功后产物自动收集至 `dist/` 目录：
+- **绿色运行目录**：`dist/lispcraft-<os>-<arch>/`（包含可执行程序 `server`、`client`、`games/` 世界包与 `web/` 前端资产）
+- **发布归档压缩包**：`dist/lispcraft-<os>-<arch>.tar.gz`（或 Windows `.zip`）
+
+---
+
 ## 🚀 跨平台编译与 GitHub Actions 自动发布
 
 本项目配置了完整的 GitHub Actions 持续集成与发布流水线 ([.github/workflows/release.yml](file:///.github/workflows/release.yml))。
