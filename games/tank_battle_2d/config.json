@@ -1,0 +1,6 @@
+{
+  "name": "Cyber Tank Battle 2D",
+  "version": "1.0.0",
+  "view_distance": 25.0,
+  "description": "Retro top-down 2D cyber tank arcade combat arena with authoritative simulation and GPU atomic rendering."
+}

@@ -148,16 +148,20 @@ LispCraft/
 │   ├── lc_server/              # [Layer 2 服务端入口] Axum GET /:game_id/:token 动态路由 + WebSocket 多世界分发 (`bin: server`)
 │   └── lc_client/              # [Layer 2 客户端入口] Macroquad 跨平台双模宿主: 联机模式 vs 离线目录文件监视热重载 (`bin: client`)
 ├── games/                      # 模块化游戏资源目录 (分 client/server/shared)
-│   ├── space_arena/            # 太空竞技场项目 (支持 client 现场绘制与 server 物理仲裁)
+│   ├── space_arena/            # 3D 太空竞技场项目 (机甲化身、能量核心、3D 浮动视口)
 │   │   ├── server/main.scm
 │   │   ├── client/main.scm
 │   │   ├── client/hud.scm
 │   │   ├── client/avatar.scm
 │   │   └── shared/constants.scm
-│   └── dungeon/                # 暗黑地牢项目
+│   ├── dungeon/                # 3D 暗黑地牢项目 (古石柱、火把系统、祭坛)
+│   │   ├── server/main.scm
+│   │   ├── client/main.scm
+│   │   └── shared/constants.scm
+│   └── tank_battle_2d/         # 2D 赛博坦克大战项目 (纯 2D GPU 屏幕图元驱动、履带战车、炮台、无人机 AI、雷达扫描)
+│       ├── config.json
 │       ├── server/main.scm
-│       ├── client/main.scm
-│       └── shared/constants.scm
+│       └── client/main.scm
 ├── web/                        # WebAssembly 宿主静态资产
 │   ├── index.html              # 网页主入口 (动态提取 URL /:game_id/:token)
 │   ├── gl.js                   # Macroquad WebGL 驱动桥
@@ -182,7 +186,10 @@ cargo run --release --bin client http://127.0.0.1:8082/space_arena/guest_1
 # 方式 B：指定地牢模式
 cargo run --release --bin client http://127.0.0.1:8082/dungeon/hero_1
 
-# 方式 C：缺省默认启动 (自动连入 space_arena)
+# 方式 C：指定 2D 赛博坦克大战模式
+cargo run --release --bin client http://127.0.0.1:8082/tank_battle_2d/commander_1
+
+# 方式 D：缺省默认启动 (自动连入 space_arena)
 cargo run --release --bin client
 ```
 
@@ -190,8 +197,11 @@ cargo run --release --bin client
 **无需启动服务端**，直接指向本地客户端脚本目录，开启毫秒级热重载：
 
 ```bash
-# 启动本地目录调试
+# 启动 3D 太空竞技场本地调试
 cargo run --bin client games/space_arena/client
+
+# 启动 2D 赛博坦克大战本地调试
+cargo run --bin client games/tank_battle_2d/client
 ```
 - 客户端启动后台监视器，监听目录下所有 `.scm` 文件的修改时间；
 - 每次在编辑器（如 VS Code）中按下 `Ctrl+S` 保存代码，控制台即刻打印 `[HotReload] Reloaded client scripts`，**屏幕画面下一帧立即发生改变，游戏无需重启！**
