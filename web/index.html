@@ -21,17 +21,29 @@
             z-index: 0;
             width: 100%;
             height: 100%;
+            outline: none;
         }
     </style>
 </head>
 
 <body>
     <canvas id="glcanvas" tabindex='1'></canvas>
-    <script src="gl.js"></script>
-    <script src="sapp_jsutils.js"></script>
-    <script src="quad-net.js"></script>
     <script>
-        load("client.wasm");
+        // Extract game_id and token from path: http://host:port/:game_id/:token
+        (function() {
+            var parts = window.location.pathname.split('/').filter(function(p) { return p.length > 0; });
+            var gameId = parts.length > 0 ? parts[0] : "space_arena";
+            var token = parts.length > 1 ? parts[1] : ("guest_" + Math.floor(Math.random() * 100000));
+            window.LISPCRAFT_GAME_ID = gameId;
+            window.LISPCRAFT_TOKEN = token;
+            console.log("[LispCraft Web] Active Game:", gameId, "| Token:", token);
+        })();
+    </script>
+    <script src="/gl.js"></script>
+    <script src="/sapp_jsutils.js"></script>
+    <script src="/quad-net.js"></script>
+    <script>
+        load("/client.wasm");
     </script>
 </body>
 

@@ -1,11 +1,30 @@
-//! # NDC Screen Projection Math
+//! # NDC Screen Projection Math & Viewport Metrics
 //!
-//! Provides `world_to_screen` and `world_to_screen_with_size` to transform 3D world
-//! coordinates into 2D viewport coordinates via view-projection matrix calculation.
+//! Provides `world_to_screen`, `world_to_screen_with_size`, and `screen_size`
+//! to transform 3D world coordinates into 2D viewport coordinates and query screen metrics.
 
 use macroquad::camera::{Camera3D, Projection};
 use macroquad::math::{vec2, vec4, Mat4, Vec2, Vec3};
 use macroquad::window::{screen_height, screen_width};
+
+/// Safely queries the current window size `(width, height)` in pixels.
+///
+/// In headless or non-window environments (e.g. unit tests), gracefully falls back to `(800.0, 600.0)`.
+pub fn screen_size() -> (f32, f32) {
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        (screen_width(), screen_height())
+    }));
+    std::panic::set_hook(prev_hook);
+
+    let (sw, sh) = res.unwrap_or((800.0, 600.0));
+    if sw <= 1.0 || sh <= 1.0 {
+        (800.0, 600.0)
+    } else {
+        (sw, sh)
+    }
+}
 
 /// Computes the view-projection matrix for a `Camera3D` given a specific viewport size.
 pub fn compute_camera_matrix(camera: &Camera3D, screen_w: f32, screen_h: f32) -> Mat4 {
@@ -62,14 +81,6 @@ pub fn world_to_screen_with_size(
 ///
 /// In headless or non-window environments (e.g. unit tests), gracefully falls back to 800x600.
 pub fn world_to_screen(camera: &Camera3D, point: Vec3) -> Option<Vec2> {
-    let prev_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        (screen_width(), screen_height())
-    }));
-    std::panic::set_hook(prev_hook);
-
-    let (sw, sh) = res.unwrap_or((800.0, 600.0));
-
+    let (sw, sh) = screen_size();
     world_to_screen_with_size(camera, point, sw, sh)
 }

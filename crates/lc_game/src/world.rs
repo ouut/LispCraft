@@ -5,12 +5,25 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use game_script::{ScriptApp, ScriptError, SteelVal};
+use game_script::{RegisterFn, ScriptApp, ScriptError, SteelVal};
 use lc_core::{ClientState, VIEW_DISTANCE};
 
 use crate::plugin::LispCraftPlugin;
+
+/// Parses a SteelVal into a `serde_json::Value`.
+///
+/// If the value is a string, attempts to parse as JSON first, falling back to a string value.
+/// If already a structured Scheme value (list, map, number, etc.), converts via `game_script`.
+fn parse_payload(val: &SteelVal) -> serde_json::Value {
+    match val {
+        SteelVal::StringV(s) => serde_json::from_str(s.as_str())
+            .unwrap_or_else(|_| serde_json::Value::String(s.to_string())),
+        SteelVal::Void => serde_json::Value::Null,
+        other => game_script::steel_val_to_json(other).unwrap_or(serde_json::Value::Null),
+    }
+}
 
 /// Resolves a script path across multiple candidate directories.
 pub fn resolve_script_path(path: &str) -> PathBuf {
@@ -41,15 +54,25 @@ pub fn resolve_script_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+pub type OutgoingEvent = (Option<String>, String, serde_json::Value);
+
 /// Upgraded Scheme simulation engine powered by `game_script::ScriptApp` (v0.2.0).
 pub struct SchemeGame {
     app: Mutex<ScriptApp>,
+    outgoing_events: Arc<Mutex<Vec<OutgoingEvent>>>,
+}
+
+impl std::fmt::Debug for SchemeGame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SchemeGame").finish()
+    }
 }
 
 impl SchemeGame {
     /// Initialize SchemeGame with the specified .scm script file.
     ///
     /// Loads the script into a new `ScriptApp` configured with `LispCraftPlugin`,
+    /// registers `fire-client!` and `broadcast-client!` remote event emission hooks,
     /// aliases `tick-game` if necessary, and calls `(init-game)` to initialize the world.
     pub fn new(script_path: &str) -> Result<Self, String> {
         let resolved = resolve_script_path(script_path);
@@ -66,16 +89,71 @@ impl SchemeGame {
         if let Some(parent) = resolved.parent() {
             if parent.exists() {
                 app.with_load_path(parent);
+                if let Some(game_root) = parent.parent() {
+                    if game_root.exists() {
+                        app.with_load_path(game_root);
+                        let shared = game_root.join("shared");
+                        if shared.exists() {
+                            app.with_load_path(&shared);
+                        }
+                    }
+                }
             }
         }
 
         app.add_plugin(LispCraftPlugin)
             .map_err(|e| format!("Plugin error: {}", e))?;
+
+        let outgoing_events = Arc::new(Mutex::new(Vec::new()));
+
+        // Native hooks for fire-client! and broadcast-client!
+        let ev_fire = Arc::clone(&outgoing_events);
+        app.engine.register_fn(
+            "__native-fire-client!",
+            move |player_name: String, event_name: String, payload: SteelVal| {
+                let val = parse_payload(&payload);
+                ev_fire
+                    .lock()
+                    .unwrap()
+                    .push((Some(player_name), event_name, val));
+            },
+        );
+
+        let ev_broadcast = Arc::clone(&outgoing_events);
+        app.engine.register_fn(
+            "__native-broadcast-client!",
+            move |event_name: String, payload: SteelVal| {
+                let val = parse_payload(&payload);
+                ev_broadcast.lock().unwrap().push((None, event_name, val));
+            },
+        );
+
+        // Define flexible wrappers supporting both (fn event payload) and (fn event)
+        let _ = app.run(
+            r#"
+(define (broadcast-client! event . rest)
+  (if (null? rest)
+      (__native-broadcast-client! event "{}")
+      (__native-broadcast-client! event (car rest))))
+(define (fire-client! player event . rest)
+  (if (null? rest)
+      (__native-fire-client! player event "{}")
+      (__native-fire-client! player event (car rest))))
+"#,
+        );
+
         app.run(&script)
             .map_err(|e| format!("Scheme script load error: {}", e))?;
 
         // Ensure tick-game alias is bound for zero-overhead direct function calls
-        let _ = app.run("(if (and (defined? 'game-tick) (not (defined? 'tick-game))) (define tick-game game-tick) (void))");
+        let _ = app.run("(if (and (defined? 'game-tick) (not (defined? 'tick-game))) (define tick-game game-tick) #t)");
+        let _ = app.run("(if (not (defined? 'tick-game)) (define (tick-game dt) #t) #t)");
+
+        // Provide no-op fallback for on-remote-event if not defined by script
+        let _ = app.run("(if (not (defined? 'on-remote-event)) (define (on-remote-event player event payload) #t) #t)");
+
+        // Ensure init-game is defined
+        let _ = app.run("(if (not (defined? 'init-game)) (define (init-game) #t) #t)");
 
         // Initialize game world
         let _ = app
@@ -88,6 +166,7 @@ impl SchemeGame {
 
         Ok(Self {
             app: Mutex::new(app),
+            outgoing_events,
         })
     }
 
@@ -95,11 +174,7 @@ impl SchemeGame {
     pub fn on_join(&self, name: &str) {
         let mut app = self.app.lock().unwrap();
         let _ = app
-            .safe_call_function(
-                "on-player-join",
-                vec![SteelVal::StringV(name.into())],
-                100,
-            )
+            .safe_call_function("on-player-join", vec![SteelVal::StringV(name.into())], 100)
             .or_else(|_| {
                 let safe_name = name.replace('\\', "\\\\").replace('"', "\\\"");
                 let code = format!(r#"(on-player-join "{}")"#, safe_name);
@@ -112,11 +187,7 @@ impl SchemeGame {
     pub fn on_leave(&self, name: &str) {
         let mut app = self.app.lock().unwrap();
         let _ = app
-            .safe_call_function(
-                "on-player-leave",
-                vec![SteelVal::StringV(name.into())],
-                100,
-            )
+            .safe_call_function("on-player-leave", vec![SteelVal::StringV(name.into())], 100)
             .or_else(|_| {
                 let safe_name = name.replace('\\', "\\\\").replace('"', "\\\"");
                 let code = format!(r#"(on-player-leave "{}")"#, safe_name);
@@ -156,7 +227,11 @@ impl SchemeGame {
         // If the command is a raw Scheme S-expression, evaluate directly via safe_eval
         if expr.trim().starts_with('(') {
             return match app.safe_eval(expr, 100) {
-                Ok(out) => out.trim().trim_start_matches("=> ").trim_matches('"').to_string(),
+                Ok(out) => out
+                    .trim()
+                    .trim_start_matches("=> ")
+                    .trim_matches('"')
+                    .to_string(),
                 Err(e) => format!("Scheme Error: {:?}", e),
             };
         }
@@ -178,11 +253,57 @@ impl SchemeGame {
                 let safe_cmd = expr.replace('\\', "\\\\").replace('"', "\\\"");
                 let code = format!(r#"(on-player-command "{}" "{}")"#, safe_name, safe_cmd);
                 match app.safe_eval(&code, 100) {
-                    Ok(res) => res.trim().trim_start_matches("=> ").trim_matches('"').to_string(),
+                    Ok(res) => res
+                        .trim()
+                        .trim_start_matches("=> ")
+                        .trim_matches('"')
+                        .to_string(),
                     Err(e) => format!("Scheme Error: {:?}", e),
                 }
             }
         }
+    }
+
+    /// Client RemoteEvent handler: calls Scheme `(on-remote-event player_name event_name payload_json_str)`.
+    pub fn on_remote_event(
+        &self,
+        player_name: &str,
+        event_name: &str,
+        payload: &serde_json::Value,
+    ) {
+        let mut app = self.app.lock().unwrap();
+        let payload_str = payload.to_string();
+        let _ = app
+            .safe_call_function(
+                "on-remote-event",
+                vec![
+                    SteelVal::StringV(player_name.into()),
+                    SteelVal::StringV(event_name.into()),
+                    SteelVal::StringV(payload_str.clone().into()),
+                ],
+                100,
+            )
+            .or_else(|_| {
+                let safe_name = player_name.replace('\\', "\\\\").replace('"', "\\\"");
+                let safe_event = event_name.replace('\\', "\\\\").replace('"', "\\\"");
+                let safe_payload = payload_str.replace('\\', "\\\\").replace('"', "\\\"");
+                let code = format!(
+                    r#"(if (defined? 'on-remote-event) (on-remote-event "{}" "{}" "{}") #t)"#,
+                    safe_name, safe_event, safe_payload
+                );
+                app.run(&code)
+                    .map(|v| v.into_iter().next().unwrap_or(SteelVal::Void))
+            });
+    }
+
+    /// Drains all outgoing server-to-client RemoteEvents queued by `fire-client!` and `broadcast-client!`.
+    ///
+    /// Returns `Vec<(Option<String>, String, serde_json::Value)>` where:
+    /// - `Some(player_name)` indicates unicast event intended for that player.
+    /// - `None` indicates broadcast event intended for all players.
+    pub fn drain_outgoing_events(&self) -> Vec<(Option<String>, String, serde_json::Value)> {
+        let mut events = self.outgoing_events.lock().unwrap();
+        std::mem::take(&mut *events)
     }
 
     /// High-frequency simulation tick: calls Scheme `(game-tick dt)` or alias `(tick-game dt)`.
@@ -208,7 +329,11 @@ impl SchemeGame {
                 let safe_name = name.replace('\\', "\\\\").replace('"', "\\\"");
                 let code = format!(r#"(get-client-state-json "{}")"#, safe_name);
                 match app.safe_eval(&code, 100) {
-                    Ok(s) => s.trim_start_matches("=> ").trim().trim_matches('"').to_string(),
+                    Ok(s) => s
+                        .trim_start_matches("=> ")
+                        .trim()
+                        .trim_matches('"')
+                        .to_string(),
                     Err(_) => "{}".to_string(),
                 }
             }
@@ -306,4 +431,3 @@ mod tests {
         assert!(!state.entities.iter().any(|e| e.id == "far_test"));
     }
 }
-

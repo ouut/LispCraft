@@ -2,8 +2,9 @@
 resolver = "2"
 members = [
     "crates/lc_core",
-    "crates/lc_game",
     "crates/lc_render",
+    "crates/lc_client_script",
+    "crates/lc_game",
     "crates/lc_server",
     "crates/lc_client",
 ]
@@ -15,8 +16,9 @@ edition = "2021"
 [workspace.dependencies]
 # Local workspace crates
 lc_core = { path = "crates/lc_core" }
-lc_game = { path = "crates/lc_game" }
 lc_render = { path = "crates/lc_render" }
+lc_client_script = { path = "crates/lc_client_script" }
+lc_game = { path = "crates/lc_game" }
 
 # Crates.io Public Bases (v0.2.0)
 game_net = "0.2.0"
@@ -32,6 +34,7 @@ tokio = { version = "1", features = ["full"] }
 steel-core = { version = "0.8.3", features = ["sync"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+getrandom = { version = "0.2.17", features = ["js"] }
 
 [profile.release]
 opt-level = 3

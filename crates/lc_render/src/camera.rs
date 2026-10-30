@@ -6,7 +6,7 @@
 use macroquad::camera::{Camera3D, Projection};
 use macroquad::math::{vec3, Vec2, Vec3};
 
-/// Third-person orbit camera with exponential smoothing.
+/// Third-person orbit camera with smooth exponential interpolation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrbitCamera {
     pub target_pos: Vec3,
@@ -28,29 +28,43 @@ impl Default for OrbitCamera {
 impl OrbitCamera {
     /// Creates a new `OrbitCamera` at the origin with default orientation.
     pub fn new() -> Self {
-        let yaw = 0.0_f32;
-        let pitch = 0.45_f32;
-        let dist = 11.0_f32;
-        let target = Vec3::ZERO;
+        let mut cam = Self {
+            target_pos: Vec3::ZERO,
+            cam_pos: Vec3::ZERO,
+            camera_yaw: 0.0,
+            target_camera_yaw: 0.0,
+            camera_pitch: 0.45,
+            target_camera_pitch: 0.45,
+            camera_dist: 11.0,
+            target_camera_dist: 11.0,
+        };
+        cam.recompute_cam_pos();
+        cam
+    }
 
-        let horiz_dist = dist * pitch.cos();
-        let vert_dist = dist * pitch.sin();
-        let cam_offset = vec3(
-            yaw.sin() * horiz_dist,
-            vert_dist,
-            yaw.cos() * horiz_dist,
-        );
+    /// Sets camera target position, yaw, pitch, and distance immediately.
+    pub fn set_params(&mut self, target: Vec3, yaw: f32, pitch: f32, dist: f32) {
+        self.target_pos = target;
+        self.camera_yaw = yaw;
+        self.target_camera_yaw = yaw;
+        self.camera_pitch = pitch;
+        self.target_camera_pitch = pitch;
+        self.camera_dist = dist;
+        self.target_camera_dist = dist;
+        self.recompute_cam_pos();
+    }
 
-        Self {
-            target_pos: target,
-            cam_pos: target + cam_offset,
-            camera_yaw: yaw,
-            target_camera_yaw: yaw,
-            camera_pitch: pitch,
-            target_camera_pitch: pitch,
-            camera_dist: dist,
-            target_camera_dist: dist,
-        }
+    /// Sets target parameters for smooth interpolation without snapping.
+    pub fn set_target_params(&mut self, target: Vec3, yaw: f32, pitch: f32, dist: f32) {
+        self.target_pos = target;
+        self.target_camera_yaw = yaw;
+        self.target_camera_pitch = pitch;
+        self.target_camera_dist = dist;
+    }
+
+    /// Returns current camera target position, yaw, pitch, and distance.
+    pub fn get_params(&self) -> (Vec3, f32, f32, f32) {
+        (self.target_pos, self.camera_yaw, self.camera_pitch, self.camera_dist)
     }
 
     /// Smoothly updates camera position and orientation towards target point using exponential smoothing.
@@ -65,14 +79,7 @@ impl OrbitCamera {
         self.camera_pitch += (self.target_camera_pitch - self.camera_pitch) * smooth_pitch;
         self.camera_dist += (self.target_camera_dist - self.camera_dist) * smooth_dist;
 
-        let horiz_dist = self.camera_dist * self.camera_pitch.cos();
-        let vert_dist = self.camera_dist * self.camera_pitch.sin();
-        let cam_offset = vec3(
-            self.camera_yaw.sin() * horiz_dist,
-            vert_dist,
-            self.camera_yaw.cos() * horiz_dist,
-        );
-        self.cam_pos = self.target_pos + cam_offset;
+        self.recompute_cam_pos();
     }
 
     /// Handles mouse drag rotation input.
@@ -110,5 +117,17 @@ impl OrbitCamera {
     /// Returns the 2D right vector in the horizontal X-Z plane.
     pub fn right(&self) -> Vec2 {
         Vec2::new(self.camera_yaw.cos(), -self.camera_yaw.sin())
+    }
+
+    /// Internal helper to recompute 3D position from spherical coordinates.
+    fn recompute_cam_pos(&mut self) {
+        let horiz_dist = self.camera_dist * self.camera_pitch.cos();
+        let vert_dist = self.camera_dist * self.camera_pitch.sin();
+        let cam_offset = vec3(
+            self.camera_yaw.sin() * horiz_dist,
+            vert_dist,
+            self.camera_yaw.cos() * horiz_dist,
+        );
+        self.cam_pos = self.target_pos + cam_offset;
     }
 }

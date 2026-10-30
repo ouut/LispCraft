@@ -1,34 +1,97 @@
-//! # `lc_render`: 3D Graphics, Camera, Projection, Radar HUD & Interpolation
+//! # `lc_render`: Whiteboard GPU Atomic Rendering Library
 //!
-//! High-performance decoupled rendering and math crate for LispCraft 3D.
-//! Completely removes graphics and vector math complexity from the client main loop:
-//! - [`OrbitCamera`]: Third-person spherical camera with exponential dampening.
-//! - [`world_to_screen`]: NDC screen projection math with frustum clipping.
-//! - [`RadarRenderer`]: Circular 2D minimap with player heading, cardinal directions, and entity blips.
-//! - [`SceneRenderer`]: 3D ground grid, player mech avatar, entity primitives (cube/sphere/pyramid/beacon), and floating billboards.
-//! - [`SnapshotInterpolationBuffer`]: Roblox-style 60~144 FPS smooth entity interpolation from 20 TPS snapshots.
-//! - [`ClientPrediction`]: Roblox-style client-side movement prediction with soft error reconciliation.
+//! Provides decoupled, pure GPU drawing atoms, 3D orbit camera controls,
+//! NDC screen projection, and client math utilities for Macroquad and Scheme script execution.
+//!
+//! ## Submodules
+//! - [`camera`]: Spherical 3D orbit camera with smooth interpolation.
+//! - [`primitives_3d`]: Low-level 3D GPU drawing primitives (cube, sphere, cylinder, plane, 3D line, billboard).
+//! - [`primitives_2d`]: Low-level 2D GPU drawing primitives (text, rectangle, circle, 2D line, measurement).
+//! - [`projection`]: Screen size query and 3D world-to-screen viewport projection.
+//! - [`mock`]: Thread-local mock hook and command capture for headless testing.
+//! - [`interpolation`]: Snapshot interpolation buffer for 60~144 FPS smooth rendering.
+//! - [`prediction`]: Client-side dead-reckoning movement prediction.
 
 pub mod camera;
 pub mod interpolation;
+pub mod mock;
 pub mod prediction;
+pub mod primitives_2d;
+pub mod primitives_3d;
 pub mod projection;
-pub mod radar;
-pub mod scene;
 
+// Primary re-exports
 pub use camera::OrbitCamera;
 pub use interpolation::{SnapshotEntry, SnapshotInterpolationBuffer};
+pub use mock::{
+    capture_render_commands, clear_render_hook, enable_headless_fallback, is_headless_fallback,
+    set_render_hook, RenderCommand,
+};
 pub use prediction::ClientPrediction;
-pub use projection::{compute_camera_matrix, world_to_screen, world_to_screen_with_size};
-pub use radar::RadarRenderer;
-pub use scene::SceneRenderer;
+pub use primitives_2d::{
+    draw_circle, draw_circle_lines, draw_line_2d, draw_rect, draw_rect_lines, draw_text_screen,
+    measure_text_width,
+};
+pub use primitives_3d::{
+    draw_billboard_text, draw_cube, draw_cube_wires, draw_cylinder, draw_line_3d, draw_plane,
+    draw_sphere, draw_sphere_wires,
+};
+pub use projection::{
+    compute_camera_matrix, screen_size, world_to_screen, world_to_screen_with_size,
+};
+
+/// Deprecated compatibility stub for transitional builds. Visuals are now driven by Scheme scripts.
+#[deprecated(note = "Radar visuals are now driven by Scheme scripts")]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RadarRenderer {
+    pub radar_range: f32,
+}
+
+#[allow(deprecated)]
+impl RadarRenderer {
+    pub fn new() -> Self {
+        Self { radar_range: 35.0 }
+    }
+    pub fn with_range(radar_range: f32) -> Self {
+        Self { radar_range }
+    }
+    pub fn draw_radar(
+        &self,
+        _center: macroquad::math::Vec2,
+        _radius: f32,
+        _player_pos: macroquad::math::Vec3,
+        _player_yaw: f32,
+        _entities: &[lc_core::EntityDesc],
+    ) {
+    }
+}
+
+/// Deprecated compatibility stub for transitional builds. Scene rendering is now driven by Scheme scripts.
+#[deprecated(note = "Scene rendering is now driven by Scheme scripts")]
+#[derive(Debug, Default, Clone)]
+pub struct SceneRenderer;
+
+#[allow(deprecated)]
+impl SceneRenderer {
+    pub fn new() -> Self {
+        Self
+    }
+    pub fn draw_scene(
+        &self,
+        _camera: &macroquad::camera::Camera3D,
+        _entities: &[lc_core::EntityDesc],
+        _player_pos: macroquad::math::Vec3,
+    ) {
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use lc_core::{ClientState, EntityDesc, LispMotionInput};
     use macroquad::camera::{Camera3D, Projection};
-    use macroquad::math::{vec3, Vec3};
+    use macroquad::color::{Color, RED, WHITE};
+    use macroquad::math::{vec2, vec3, Vec3};
 
     // --- Camera Tests ---
     #[test]
@@ -62,6 +125,23 @@ mod tests {
     }
 
     #[test]
+    fn test_orbit_camera_set_and_get_params() {
+        let mut cam = OrbitCamera::new();
+        let target = vec3(10.0, 2.5, -7.0);
+        cam.set_params(target, 1.2, 0.6, 15.0);
+
+        let (got_target, yaw, pitch, dist) = cam.get_params();
+        assert_eq!(got_target, target);
+        assert!((yaw - 1.2).abs() < 1e-5);
+        assert!((pitch - 0.6).abs() < 1e-5);
+        assert!((dist - 15.0).abs() < 1e-5);
+
+        let cam3d = cam.to_camera3d();
+        assert_eq!(cam3d.target, target);
+        assert!((cam3d.position - cam.cam_pos).length() < 1e-5);
+    }
+
+    #[test]
     fn test_camera_directional_vectors() {
         let mut cam = OrbitCamera::new();
         cam.camera_yaw = 0.0;
@@ -74,7 +154,30 @@ mod tests {
         assert!((right.y).abs() < 1e-4);
     }
 
+    #[test]
+    fn test_orbit_camera_clamping() {
+        let mut cam = OrbitCamera::new();
+        // Pitch clamping
+        cam.handle_mouse_orbit(0.0, 1000.0);
+        assert!((cam.target_camera_pitch - 1.35).abs() < 1e-4);
+        cam.handle_mouse_orbit(0.0, -2000.0);
+        assert!((cam.target_camera_pitch - 0.12).abs() < 1e-4);
+
+        // Zoom clamping
+        cam.handle_zoom(100.0);
+        assert!((cam.target_camera_dist - 4.0).abs() < 1e-4);
+        cam.handle_zoom(-100.0);
+        assert!((cam.target_camera_dist - 26.0).abs() < 1e-4);
+    }
+
     // --- Projection Tests ---
+    #[test]
+    fn test_screen_size_fallback() {
+        let (w, h) = screen_size();
+        assert!(w > 0.0);
+        assert!(h > 0.0);
+    }
+
     #[test]
     fn test_projection_center() {
         let camera = Camera3D {
@@ -133,9 +236,183 @@ mod tests {
             z_far: 1000.0,
         };
 
-        // In headless testing, world_to_screen should gracefully use the 800x600 fallback without panicking
+        // In headless testing, world_to_screen should gracefully use the screen_size fallback without panicking
         let screen = world_to_screen(&camera, vec3(0.0, 0.0, 0.0));
         assert!(screen.is_some());
+    }
+
+    // --- 3D and 2D Primitives Drawing Tests (Mock Hook) ---
+    #[test]
+    fn test_mock_capture_3d_primitives() {
+        let camera = OrbitCamera::new().to_camera3d();
+
+        let ((), cmds) = capture_render_commands(|| {
+            draw_cube(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), RED);
+            draw_cube_wires(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), WHITE);
+            draw_sphere(vec3(0.0, 1.0, 0.0), 2.5, Color::new(0.0, 1.0, 0.0, 1.0));
+            draw_sphere_wires(vec3(0.0, 1.0, 0.0), 2.5, WHITE);
+            draw_cylinder(vec3(0.0, 0.0, 0.0), 1.0, 2.0, 3.0, 8, RED);
+            draw_plane(vec3(0.0, 0.0, 0.0), vec2(10.0, 10.0), WHITE);
+            draw_line_3d(vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0), RED);
+            draw_billboard_text("Test Label", vec3(0.0, 2.0, 0.0), 14.0, WHITE, &camera);
+        });
+
+        assert_eq!(cmds.len(), 8);
+        assert_eq!(
+            cmds[0],
+            RenderCommand::DrawCube {
+                pos: vec3(1.0, 2.0, 3.0),
+                size: vec3(4.0, 5.0, 6.0),
+                color: RED,
+            }
+        );
+        assert_eq!(
+            cmds[1],
+            RenderCommand::DrawCubeWires {
+                pos: vec3(1.0, 2.0, 3.0),
+                size: vec3(4.0, 5.0, 6.0),
+                color: WHITE,
+            }
+        );
+        assert_eq!(
+            cmds[2],
+            RenderCommand::DrawSphere {
+                pos: vec3(0.0, 1.0, 0.0),
+                radius: 2.5,
+                color: Color::new(0.0, 1.0, 0.0, 1.0),
+            }
+        );
+        assert_eq!(
+            cmds[3],
+            RenderCommand::DrawSphereWires {
+                pos: vec3(0.0, 1.0, 0.0),
+                radius: 2.5,
+                color: WHITE,
+            }
+        );
+        assert_eq!(
+            cmds[4],
+            RenderCommand::DrawCylinder {
+                pos: vec3(0.0, 0.0, 0.0),
+                r_top: 1.0,
+                r_bot: 2.0,
+                height: 3.0,
+                sides: 8,
+                color: RED,
+            }
+        );
+        assert_eq!(
+            cmds[5],
+            RenderCommand::DrawPlane {
+                pos: vec3(0.0, 0.0, 0.0),
+                size: vec2(10.0, 10.0),
+                color: WHITE,
+            }
+        );
+        assert_eq!(
+            cmds[6],
+            RenderCommand::DrawLine3D {
+                start: vec3(0.0, 0.0, 0.0),
+                end: vec3(1.0, 1.0, 1.0),
+                color: RED,
+            }
+        );
+        assert_eq!(
+            cmds[7],
+            RenderCommand::DrawBillboardText {
+                text: "Test Label".to_string(),
+                pos: vec3(0.0, 2.0, 0.0),
+                font_size: 14.0,
+                color: WHITE,
+            }
+        );
+    }
+
+    #[test]
+    fn test_mock_capture_2d_primitives() {
+        let ((), cmds) = capture_render_commands(|| {
+            draw_text_screen("Hello Scheme", 10.0, 20.0, 16.0, WHITE);
+            draw_rect(50.0, 60.0, 100.0, 80.0, RED);
+            draw_rect_lines(50.0, 60.0, 100.0, 80.0, 2.0, WHITE);
+            draw_circle(200.0, 200.0, 25.0, Color::new(0.0, 0.0, 1.0, 1.0));
+            draw_circle_lines(200.0, 200.0, 25.0, 1.5, WHITE);
+            draw_line_2d(0.0, 0.0, 100.0, 100.0, 3.0, RED);
+        });
+
+        assert_eq!(cmds.len(), 6);
+        assert_eq!(
+            cmds[0],
+            RenderCommand::DrawTextScreen {
+                text: "Hello Scheme".to_string(),
+                x: 10.0,
+                y: 20.0,
+                font_size: 16.0,
+                color: WHITE,
+            }
+        );
+        assert_eq!(
+            cmds[1],
+            RenderCommand::DrawRect {
+                x: 50.0,
+                y: 60.0,
+                w: 100.0,
+                h: 80.0,
+                color: RED,
+            }
+        );
+        assert_eq!(
+            cmds[2],
+            RenderCommand::DrawRectLines {
+                x: 50.0,
+                y: 60.0,
+                w: 100.0,
+                h: 80.0,
+                thickness: 2.0,
+                color: WHITE,
+            }
+        );
+        assert_eq!(
+            cmds[3],
+            RenderCommand::DrawCircle {
+                x: 200.0,
+                y: 200.0,
+                radius: 25.0,
+                color: Color::new(0.0, 0.0, 1.0, 1.0),
+            }
+        );
+        assert_eq!(
+            cmds[4],
+            RenderCommand::DrawCircleLines {
+                x: 200.0,
+                y: 200.0,
+                radius: 25.0,
+                thickness: 1.5,
+                color: WHITE,
+            }
+        );
+        assert_eq!(
+            cmds[5],
+            RenderCommand::DrawLine2D {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 100.0,
+                y2: 100.0,
+                thickness: 3.0,
+                color: RED,
+            }
+        );
+
+        let w = measure_text_width("Hello", 16.0);
+        assert!(w > 0.0);
+    }
+
+    #[test]
+    fn test_headless_safe_drawing_without_panic() {
+        // Direct drawing calls in headless test environment must not panic
+        draw_cube(vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0), RED);
+        draw_rect(0.0, 0.0, 10.0, 10.0, WHITE);
+        let cam = Camera3D::default();
+        draw_billboard_text("Safe", vec3(0.0, 0.0, 0.0), 12.0, WHITE, &cam);
     }
 
     // --- Prediction Tests ---
@@ -171,6 +448,22 @@ mod tests {
         assert_eq!(pred.predicted_pos, vec3(50.0, 0.0, 0.0));
     }
 
+    #[test]
+    fn test_client_prediction_reset_and_diagonal() {
+        let mut pred = ClientPrediction::new(Vec3::ZERO);
+        let input = LispMotionInput {
+            dx: 0.70710677,
+            dz: 0.70710677,
+            yaw: 0.0,
+        };
+        pred.predict_move(&input, 10.0, 1.0);
+        assert!((pred.pos().x - 7.071_068).abs() < 1e-4);
+        assert!((pred.pos().z - 7.071_068).abs() < 1e-4);
+
+        pred.reset(vec3(100.0, 20.0, 30.0));
+        assert_eq!(pred.pos(), vec3(100.0, 20.0, 30.0));
+    }
+
     // --- Interpolation Tests ---
     fn make_test_state(id: &str, pos: [f32; 3], cam_target: [f32; 3]) -> ClientState {
         ClientState {
@@ -189,6 +482,7 @@ mod tests {
                 label: "Target".to_string(),
             }],
             logs: vec![],
+            properties: Default::default(),
         }
     }
 
@@ -237,22 +531,6 @@ mod tests {
     }
 
     #[test]
-    fn test_orbit_camera_clamping() {
-        let mut cam = OrbitCamera::new();
-        // Test pitch clamping
-        cam.handle_mouse_orbit(0.0, 1000.0);
-        assert!((cam.target_camera_pitch - 1.35).abs() < 1e-4);
-        cam.handle_mouse_orbit(0.0, -2000.0);
-        assert!((cam.target_camera_pitch - 0.12).abs() < 1e-4);
-
-        // Test zoom clamping
-        cam.handle_zoom(100.0);
-        assert!((cam.target_camera_dist - 4.0).abs() < 1e-4);
-        cam.handle_zoom(-100.0);
-        assert!((cam.target_camera_dist - 26.0).abs() < 1e-4);
-    }
-
-    #[test]
     fn test_snapshot_interpolation_out_of_order_and_pruning() {
         let mut buffer = SnapshotInterpolationBuffer::with_history_seconds(2.5);
         let s0 = make_test_state("bot_1", [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
@@ -272,30 +550,5 @@ mod tests {
         let s3 = make_test_state("bot_1", [40.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
         buffer.push(10.0, s3);
         assert!(buffer.len() <= 3);
-    }
-
-    #[test]
-    fn test_client_prediction_reset_and_diagonal() {
-        let mut pred = ClientPrediction::new(Vec3::ZERO);
-        let input = LispMotionInput {
-            dx: 0.70710677,
-            dz: 0.70710677,
-            yaw: 0.0,
-        };
-        pred.predict_move(&input, 10.0, 1.0);
-        assert!((pred.pos().x - 7.071_068).abs() < 1e-4);
-        assert!((pred.pos().z - 7.071_068).abs() < 1e-4);
-
-        pred.reset(vec3(100.0, 20.0, 30.0));
-        assert_eq!(pred.pos(), vec3(100.0, 20.0, 30.0));
-    }
-
-    #[test]
-    fn test_radar_renderer_construction() {
-        let radar = RadarRenderer::new();
-        assert_eq!(radar.radar_range, 35.0);
-
-        let custom = RadarRenderer::with_range(50.0);
-        assert_eq!(custom.radar_range, 50.0);
     }
 }

@@ -11,8 +11,14 @@ path = "src/main.rs"
 [dependencies]
 lc_core = { workspace = true }
 lc_render = { workspace = true }
+lc_client_script = { workspace = true }
 game_net = { workspace = true }
 macroquad = { workspace = true }
 quad-net = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }
+js-sys = "0.3"
+sapp-jsutils = "0.1.7"

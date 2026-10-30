@@ -119,7 +119,7 @@ cargo run --release --bin server games/dungeon.scm
 
 ---
 
-## 📁 代码工程架构 (Strict 3-Tier Star-Tree DAG)
+## 📁 代码工程架构 (Strict 3-Tier Star-Tree DAG & Roblox Paradigm)
 
 项目遵循单向树状无环 (DAG) Cargo Workspace 架构规范，依赖公共三底座（`game_net = "0.2.0"`, `game_server = "0.2.0"`, `game_script = "0.2.0"`），各子包正交解耦、禁止反向依赖，支持多 Agent 协同并发开发：
 
@@ -135,15 +135,24 @@ LispCraft/
 │   └── PORTING_TO_LISPCRAFT.md # LispCraft 落地网络与脚本底座实战全解析
 ├── crates/
 │   ├── lc_core/                # [Layer 0 领域契约] 纯协议 DTO、实体描述与 25m 视距常量 (零业务依赖)
-│   ├── lc_game/                # [Layer 1 业务插件] LispCraftPlugin、Scheme 规则引擎与 25m 视距裁剪
-│   ├── lc_render/              # [Layer 1 渲染系统] OrbitCamera 摄像机、NDC 投影、3D 图元、2D 雷达与 60FPS 平滑插值
-│   ├── lc_server/              # [Layer 2 服务端入口] Axum 单端口网关 + 20 TPS 仿真循环 (`bin: server`)
-│   └── lc_client/              # [Layer 2 客户端入口] Macroquad 跨平台窗口 + 客户端即时预测器 (`bin: client`)
-├── games/                      # Scheme 编写的游戏世界规则包 (*.scm)
-│   ├── space_arena.scm         # 太空竞技场模式 (空间裁剪、拾取物、全指令)
-│   └── dungeon.scm             # 暗黑地牢探险模式 (迷雾视野、石柱、火把放置)
+│   ├── lc_render/              # [Layer 1 渲染底座] 白板化 GPU 绘图原子、OrbitCamera 摄像机与 NDC 投影 (绝对零业务写死)
+│   ├── lc_client_script/       # [Layer 1 客户端脚本] 客户端 Steel Scheme VM、虚拟 VFS 模块化 loader、原生绘图原语注入
+│   ├── lc_game/                # [Layer 1 服务端引擎] GameManager 多游戏动态管理、BundleScript 脚本打包器、25m 视距裁剪
+│   ├── lc_server/              # [Layer 2 服务端入口] Axum GET /:game_id/:token 动态路由 + WebSocket 多世界分发 (`bin: server`)
+│   └── lc_client/              # [Layer 2 客户端入口] Macroquad 跨平台双模宿主: 联机模式 vs 离线目录文件监视热重载 (`bin: client`)
+├── games/                      # 模块化游戏资源目录 (分 client/server/shared)
+│   ├── space_arena/            # 太空竞技场项目 (支持 client 现场绘制与 server 物理仲裁)
+│   │   ├── server/main.scm
+│   │   ├── client/main.scm
+│   │   ├── client/hud.scm
+│   │   ├── client/avatar.scm
+│   │   └── shared/constants.scm
+│   └── dungeon/                # 暗黑地牢项目
+│       ├── server/main.scm
+│       ├── client/main.scm
+│       └── shared/constants.scm
 ├── web/                        # WebAssembly 宿主静态资产
-│   ├── index.html              # 网页主入口
+│   ├── index.html              # 网页主入口 (动态提取 URL /:game_id/:token)
 │   ├── gl.js                   # Macroquad WebGL 驱动桥
 │   ├── sapp_jsutils.js         # Miniquad JS 对象交换工具
 │   ├── quad-net.js             # quad-net WebSocket 运行时插件
@@ -151,6 +160,34 @@ LispCraft/
 └── tests/
     └── e2e_multiplayer_test.py # 19 项端到端多客户端并发仿真自动化验收测试套件
 ```
+
+---
+
+## 🎮 客户端双模运行指南
+
+### 1. 联机同构模式 (Online Mode)
+连接至服务端网关，自动协商 WebSocket、下发虚拟脚本包并由客户端 Scheme 本地渲染：
+
+```bash
+# 方式 A：标准 URL 参数 (与浏览器行为 100% 同构)
+cargo run --release --bin client http://127.0.0.1:8087/space_arena/guest_1
+
+# 方式 B：指定地牢模式
+cargo run --release --bin client http://127.0.0.1:8087/dungeon/hero_1
+
+# 方式 C：缺省默认启动 (自动连入 space_arena)
+cargo run --release --bin client
+```
+
+### 2. 本地离线开发热更新模式 (Standalone Hot-Reload Mode)
+**无需启动服务端**，直接指向本地客户端脚本目录，开启毫秒级热重载：
+
+```bash
+# 启动本地目录调试
+cargo run --bin client games/space_arena/client
+```
+- 客户端启动后台监视器，监听目录下所有 `.scm` 文件的修改时间；
+- 每次在编辑器（如 VS Code）中按下 `Ctrl+S` 保存代码，控制台即刻打印 `[HotReload] Reloaded client scripts`，**屏幕画面下一帧立即发生改变，游戏无需重启！**
 
 ---
 

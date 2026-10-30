@@ -764,8 +764,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if 1.0.5",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1261,12 +1263,31 @@ name = "lc_client"
 version = "0.2.0"
 dependencies = [
  "game_net",
+ "getrandom 0.2.17",
+ "js-sys",
+ "lc_client_script",
  "lc_core",
  "lc_render",
  "macroquad",
  "quad-net",
+ "sapp-jsutils",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lc_client_script"
+version = "0.2.0"
+dependencies = [
+ "game_net",
+ "game_script",
+ "getrandom 0.2.17",
+ "lc_core",
+ "lc_render",
+ "macroquad",
+ "serde",
+ "serde_json",
+ "steel-core",
 ]
 
 [[package]]
@@ -1302,6 +1323,8 @@ dependencies = [
 name = "lc_server"
 version = "0.2.0"
 dependencies = [
+ "axum",
+ "futures-util",
  "game_net",
  "game_server",
  "lc_core",
@@ -1309,6 +1332,9 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tower-http",
 ]
 
 [[package]]

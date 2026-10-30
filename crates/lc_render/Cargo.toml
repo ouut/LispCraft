@@ -2,7 +2,7 @@
 name = "lc_render"
 version.workspace = true
 edition.workspace = true
-description = "3D orbit camera, NDC projection, 3D entity rendering, and 2D radar HUD for LispCraft"
+description = "Pure whiteboard GPU atomic rendering primitives, 3D orbit camera, and projection math for LispCraft"
 
 [dependencies]
 lc_core = { workspace = true }
