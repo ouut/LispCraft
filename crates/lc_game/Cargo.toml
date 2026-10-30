@@ -1,0 +1,13 @@
+[package]
+name = "lc_game"
+version.workspace = true
+edition.workspace = true
+description = "Scheme game world driver, spatial culling, and LispCraftPlugin for game_script"
+
+[dependencies]
+lc_core = { workspace = true }
+game_net = { workspace = true }
+game_script = { workspace = true }
+steel-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

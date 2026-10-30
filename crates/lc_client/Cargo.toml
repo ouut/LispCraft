@@ -1,0 +1,18 @@
+[package]
+name = "lc_client"
+version.workspace = true
+edition.workspace = true
+description = "Macroquad WASM and Native 3D client for LispCraft"
+
+[[bin]]
+name = "client"
+path = "src/main.rs"
+
+[dependencies]
+lc_core = { workspace = true }
+lc_render = { workspace = true }
+game_net = { workspace = true }
+macroquad = { workspace = true }
+quad-net = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

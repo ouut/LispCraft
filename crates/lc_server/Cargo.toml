@@ -1,0 +1,18 @@
+[package]
+name = "lc_server"
+version.workspace = true
+edition.workspace = true
+description = "Industrial Axum HTTP and WebSocket gateway server for LispCraft 3D"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+lc_core = { workspace = true }
+lc_game = { workspace = true }
+game_net = { workspace = true }
+game_server = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

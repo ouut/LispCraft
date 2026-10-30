@@ -1,7 +1,15 @@
+//! # lc_core: Core Domain Contracts for LispCraft 3D
+//!
+//! Layer 0 domain contract crate defining shared protocol envelopes,
+//! motion inputs, game commands, entity descriptions, and view constants.
+
 use serde::{Deserialize, Serialize};
 
-// Re-export Layer 0 protocol types
+// Re-export Layer 0 protocol types from game_net
 pub use game_net::{ClientEnvelope, DualCodec, PlayerId, ServerEnvelope};
+
+/// Standard visibility culling distance in world units (meters).
+pub const VIEW_DISTANCE: f32 = 25.0;
 
 /// 客户端移动输入向量 (TInput: Latest-Only Latch)
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

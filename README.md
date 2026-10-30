@@ -119,29 +119,27 @@ cargo run --release --bin server games/dungeon.scm
 
 ---
 
-## 📁 代码工程架构
+## 📁 代码工程架构 (Strict 3-Tier Star-Tree DAG)
+
+项目遵循单向树状无环 (DAG) Cargo Workspace 架构规范，依赖公共三底座（`game_net = "0.2.0"`, `game_server = "0.2.0"`, `game_script = "0.2.0"`），各子包正交解耦、禁止反向依赖，支持多 Agent 协同并发开发：
 
 ```text
 LispCraft/
 ├── .github/workflows/
 │   └── release.yml             # 跨平台 (Win/Mac ARM64/Linux) 编译与自动发布流水线
-├── Cargo.toml                  # Cargo 工作区定义
-├── docs/                       # 跨游戏通用架构与移植指南
+├── Cargo.toml                  # 统一管理 workspace.dependencies 与 members
+├── docs/                       # 架构设计、并发工作流与移植指南
+│   ├── REQUIREMENTS_DAG.md     # [架构核心] 3-Tier DAG 需求规格与 Roblox 渲染预测规范
+│   ├── MULTI_AGENT_WORKFLOW.md # [协作手册] 多 Agent 并发开发文件所有权隔离与屏障规范
 │   ├── CROSS_GAME_PORTING.md   # 三款游戏 Layer 0 通用底座架构规范
 │   └── PORTING_TO_LISPCRAFT.md # LispCraft 落地网络与脚本底座实战全解析
-├── shared/                     # 客户端与服务端共用的通信协议与 DTO
-│   ├── Cargo.toml
-│   └── src/lib.rs              # ClientMsg, ServerMsg, ClientState, EntityDesc
-├── server/                     # 服务端核心 (Rust + Steel Scheme + game_server)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs             # 单端口一体化网关、会话事件中枢与 20 TPS 仿真主循环
-│       ├── net_bridge.rs       # 协议映射层 (PlayerId 双射、移动锁存、命令队列转换)
-│       └── scheme_game.rs      # Steel Scheme 虚拟机绑定与 safe_eval / tick 执行
-├── client/                     # 3D 客户端 (Macroquad 3D + game_net 双模解码)
-│   ├── Cargo.toml
-│   └── src/main.rs             # 平滑追随相机、战术雷达、3D投影标牌、控制台
-├── games/                      # Scheme 编写的游戏规则包
+├── crates/
+│   ├── lc_core/                # [Layer 0 领域契约] 纯协议 DTO、实体描述与 25m 视距常量 (零业务依赖)
+│   ├── lc_game/                # [Layer 1 业务插件] LispCraftPlugin、Scheme 规则引擎与 25m 视距裁剪
+│   ├── lc_render/              # [Layer 1 渲染系统] OrbitCamera 摄像机、NDC 投影、3D 图元、2D 雷达与 60FPS 平滑插值
+│   ├── lc_server/              # [Layer 2 服务端入口] Axum 单端口网关 + 20 TPS 仿真循环 (`bin: server`)
+│   └── lc_client/              # [Layer 2 客户端入口] Macroquad 跨平台窗口 + 客户端即时预测器 (`bin: client`)
+├── games/                      # Scheme 编写的游戏世界规则包 (*.scm)
 │   ├── space_arena.scm         # 太空竞技场模式 (空间裁剪、拾取物、全指令)
 │   └── dungeon.scm             # 暗黑地牢探险模式 (迷雾视野、石柱、火把放置)
 ├── web/                        # WebAssembly 宿主静态资产
@@ -151,8 +149,7 @@ LispCraft/
 │   ├── quad-net.js             # quad-net WebSocket 运行时插件
 │   └── client.wasm             # 预编译生成的 WebAssembly 二进制
 └── tests/
-    ├── e2e_multiplayer_test.py # 19 项端到端多客户端并发仿真自动化验收测试套件
-    └── scheme_test.rs          # Scheme 虚拟机全生命周期单测
+    └── e2e_multiplayer_test.py # 19 项端到端多客户端并发仿真自动化验收测试套件
 ```
 
 ---

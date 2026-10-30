@@ -1,0 +1,10 @@
+[package]
+name = "lc_core"
+version.workspace = true
+edition.workspace = true
+description = "Core domain contracts and protocol definitions for LispCraft 3D"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+game_net = { workspace = true }
