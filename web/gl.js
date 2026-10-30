@@ -1178,16 +1178,20 @@ var importObject = {
         },
         run_animation_loop: function (blocking) {
             canvas.onmousemove = function (event) {
-                var relative_position = mouse_relative_position(event.clientX, event.clientY);
-                var x = relative_position.x;
-                var y = relative_position.y;
+                try {
+                    var relative_position = mouse_relative_position(event.clientX, event.clientY);
+                    var x = relative_position.x;
+                    var y = relative_position.y;
 
-                // TODO: do not send mouse_move when cursor is captured
-                wasm_exports.mouse_move(Math.floor(x), Math.floor(y));
+                    // TODO: do not send mouse_move when cursor is captured
+                    wasm_exports.mouse_move(Math.floor(x), Math.floor(y));
 
-                // TODO: check that mouse is captured?
-                if (event.movementX != 0 || event.movementY != 0) {
-                    wasm_exports.raw_mouse_move(Math.floor(event.movementX), Math.floor(event.movementY));
+                    // TODO: check that mouse is captured?
+                    if (event.movementX != 0 || event.movementY != 0) {
+                        wasm_exports.raw_mouse_move(Math.floor(event.movementX), Math.floor(event.movementY));
+                    }
+                } catch (e) {
+                    console.warn('[gl.js] mousemove suppressed error:', e);
                 }
             };
             canvas.onmousedown = function (event) {
@@ -1307,7 +1311,11 @@ var importObject = {
             });
 
             window.onresize = function () {
-                resize(canvas, wasm_exports.resize);
+                try {
+                    resize(canvas, wasm_exports.resize);
+                } catch (e) {
+                    console.warn('[gl.js] resize suppressed error:', e);
+                }
             };
             window.addEventListener("copy", function (e) {
                 if (clipboard != null) {
@@ -1366,12 +1374,16 @@ var importObject = {
 
             let lastFocus = document.hasFocus();
             var checkFocus = function () {
-                // The element doesn't loose focus when the user switches tabs.
-                // However, the document becomes invisible
-                let hasFocus = document.hasFocus() && document.visibilityState == "visible";
-                if (lastFocus != hasFocus) {
-                    wasm_exports.focus(hasFocus);
-                    lastFocus = hasFocus;
+                try {
+                    // The element doesn't loose focus when the user switches tabs.
+                    // However, the document becomes invisible
+                    let hasFocus = document.hasFocus() && document.visibilityState == "visible";
+                    if (lastFocus != hasFocus) {
+                        wasm_exports.focus(hasFocus);
+                        lastFocus = hasFocus;
+                    }
+                } catch (e) {
+                    console.warn('[gl.js] focus suppressed error:', e);
                 }
             }
             document.addEventListener("visibilitychange", checkFocus);

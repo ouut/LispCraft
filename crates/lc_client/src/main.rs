@@ -494,6 +494,7 @@ async fn main() {
     let mut last_reconnect_time = 0.0_f32;
     let mut last_ping_time = 0.0_f32;
     let mut ping_ms: Option<u64> = None;
+    let mut was_connected = false;
 
     let mut player_id_str = "player_local".to_string();
     let mut cam_initialized = false;
@@ -548,17 +549,12 @@ async fn main() {
                         client_version: "0.2.0".to_string(),
                     };
                     s.send_envelope(&auth_env);
-                    add_log(
-                        &mut message_logs,
-                        format!("[NET] Connected to Scheme Game Server ({})", online.server_addr),
-                        Color::new(0.2, 0.95, 0.6, 1.0),
-                    );
                     socket = Some(s);
                 }
             }
 
-            // Periodic ping heartbeat (every 3 seconds)
-            if time - last_ping_time >= 3.0 {
+            // Periodic ping heartbeat (every 3 seconds when connected)
+            if was_connected && time - last_ping_time >= 3.0 {
                 last_ping_time = time;
                 if let Some(ref mut sock) = socket {
                     let client_time_ms = (get_time() * 1000.0) as u64;
@@ -570,9 +566,15 @@ async fn main() {
             // Poll incoming socket packets
             let mut conn_dropped = false;
             if let Some(ref mut sock) = socket {
-                if !sock.is_connected() {
-                    conn_dropped = true;
-                } else {
+                if sock.is_connected() {
+                    if !was_connected {
+                        was_connected = true;
+                        add_log(
+                            &mut message_logs,
+                            format!("[NET] Connected to Scheme Game Server ({})", online.server_addr),
+                            Color::new(0.2, 0.95, 0.6, 1.0),
+                        );
+                    }
                     while let Some(bytes) = sock.try_recv() {
                         if let Ok(envelope) =
                             DualCodec::decode_server::<ClientState, LispEvent>(&bytes)
@@ -721,11 +723,18 @@ async fn main() {
                             runtime.set_replicated_state(state.clone());
                         }
                     }
+                } else if was_connected {
+                    // Lost active connection
+                    conn_dropped = true;
+                } else if time - last_reconnect_time > 10.0 {
+                    // Connection handshake timeout
+                    conn_dropped = true;
                 }
             }
 
             if conn_dropped {
                 socket = None;
+                was_connected = false;
                 add_log(
                     &mut message_logs,
                     "[NET] Disconnected from server. Reconnecting...".to_string(),
@@ -740,7 +749,9 @@ async fn main() {
                     payload,
                 });
                 if let Some(ref mut sock) = socket {
-                    sock.send_envelope(&cmd_env);
+                    if was_connected {
+                        sock.send_envelope(&cmd_env);
+                    }
                 }
             }
         }
@@ -761,7 +772,8 @@ async fn main() {
                     }
                     history_index = None;
 
-                    if let Some(ref mut sock) = socket {
+                    if was_connected && socket.is_some() {
+                        let sock = socket.as_mut().unwrap();
                         let cmd_env = ClientEnvelope::Command(LispGameCommand::SchemeCommand(
                             trimmed.clone(),
                         ));
@@ -881,7 +893,9 @@ async fn main() {
                 let speed = 8.0_f32;
                 client_prediction.predict_move(&input, speed, dt);
                 if let Some(ref mut sock) = socket {
-                    sock.send_envelope(&ClientEnvelope::Input(input));
+                    if was_connected {
+                        sock.send_envelope(&ClientEnvelope::Input(input));
+                    }
                 }
             }
 

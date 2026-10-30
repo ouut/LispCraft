@@ -16,6 +16,7 @@ miniquad_add_plugin({ register_plugin, on_init, version: 1, name: "quad_net" });
 var quad_socket;
 var connected = 0;
 var received_buffer = [];
+var send_buffer = [];
 
 function ws_is_connected() {
     return connected;
@@ -35,16 +36,26 @@ function ws_connect(addr) {
         raw_addr = protocol + '//' + location.host + path;
     }
     console.log('[quad-net] Connecting WebSocket to:', raw_addr);
+    send_buffer = [];
     try {
         quad_socket = new WebSocket(raw_addr);
         quad_socket.binaryType = 'arraybuffer';
         quad_socket.onopen = function() {
             console.log('[quad-net] WebSocket connected successfully to', raw_addr);
             connected = 1;
+            while (send_buffer.length > 0) {
+                var pending = send_buffer.shift();
+                try {
+                    quad_socket.send(pending);
+                } catch (e) {
+                    console.error('[quad-net] Failed to send buffered message:', e);
+                }
+            }
         };
         quad_socket.onclose = function(e) {
             console.log('[quad-net] WebSocket disconnected, code:', e.code);
             connected = 0;
+            send_buffer = [];
         };
         quad_socket.onerror = function(err) {
             console.error('[quad-net] WebSocket error:', err);
@@ -73,12 +84,31 @@ function ws_connect(addr) {
 
 function ws_send(data) {
     var obj = consume_js_object(data);
+    var payload;
     if (typeof obj === "string") {
-        quad_socket.send(obj);
+        payload = obj;
     } else if (obj && obj.buffer !== undefined) {
-        quad_socket.send(obj.buffer);
+        payload = obj.buffer;
     } else {
-        quad_socket.send(obj);
+        payload = obj;
+    }
+
+    if (!quad_socket) {
+        console.warn('[quad-net] ws_send called with no socket');
+        return;
+    }
+
+    if (quad_socket.readyState === 1 /* WebSocket.OPEN */) {
+        try {
+            quad_socket.send(payload);
+        } catch (e) {
+            console.error('[quad-net] Error sending message on open socket:', e);
+        }
+    } else if (quad_socket.readyState === 0 /* WebSocket.CONNECTING */) {
+        // Queue for dispatch upon onopen
+        send_buffer.push(payload);
+    } else {
+        console.warn('[quad-net] ws_send dropped packet, socket state:', quad_socket.readyState);
     }
 };
 

@@ -1,6 +1,6 @@
 //! # ClientSchemeRuntime: Client-side Scheme runtime engine
 //!
-//! Embeds Steel Scheme VM via `game_script::ScriptApp`, providing:
+//! Embeds Steel Scheme VM via `steel::steel_vm::engine::Engine`, providing:
 //! - Full Macroquad 3D/2D GPU rendering bindings
 //! - In-memory Virtual File System (VFS) modular loading and hot-reload
 //! - Dual-way RemoteEvent queue and event callback registration
@@ -10,16 +10,17 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use game_script::{json_to_steel_val, ScriptApp, SteelVal};
+use game_script::{json_to_steel_val, SteelVal};
 use lc_core::ClientState;
 use lc_render::OrbitCamera;
+use steel::steel_vm::engine::Engine;
 
 use crate::bindings::register_bindings;
 use crate::vfs::{scan_directory, sort_vfs_entries};
 
 /// Client-side Scheme scripting and execution runtime.
 pub struct ClientSchemeRuntime {
-    app: ScriptApp,
+    engine: Engine,
     vfs: HashMap<String, String>,
     state_cache: Arc<Mutex<ClientState>>,
     camera: Arc<Mutex<OrbitCamera>>,
@@ -38,7 +39,7 @@ impl ClientSchemeRuntime {
     /// Creates a new `ClientSchemeRuntime` with an initialized Steel Scheme engine,
     /// empty VFS, default camera, and all native GPU drawing bindings registered.
     pub fn new() -> Result<Self, String> {
-        let mut app = ScriptApp::new();
+        let mut engine = Engine::new();
 
         let state_cache = Arc::new(Mutex::new(ClientState {
             client_id: "local".to_string(),
@@ -56,14 +57,14 @@ impl ClientSchemeRuntime {
         let outgoing_events = Arc::new(Mutex::new(Vec::new()));
 
         register_bindings(
-            app.engine(),
+            &mut engine,
             Arc::clone(&state_cache),
             Arc::clone(&camera),
             Arc::clone(&outgoing_events),
         )?;
 
         Ok(Self {
-            app,
+            engine,
             vfs: HashMap::new(),
             state_cache,
             camera,
@@ -83,7 +84,7 @@ impl ClientSchemeRuntime {
         let sorted = sort_vfs_entries(vfs);
         for (path, content) in sorted {
             self.vfs.insert(path.clone(), content.clone());
-            self.app.run(content).map_err(|e| {
+            self.engine.run(content.clone()).map_err(|e| {
                 format!("Failed to execute VFS script '{}': {}", path, e)
             })?;
         }
@@ -102,8 +103,8 @@ impl ClientSchemeRuntime {
     /// Lifecycle hook: calls Scheme `(client-init)` if defined.
     pub fn init(&mut self) -> Result<(), String> {
         if self.has_client_init {
-            self.app
-                .safe_call_function("client-init", vec![], 200_000)
+            self.engine
+                .call_function_by_name_with_args("client-init", vec![])
                 .map_err(|e| format!("client-init failed: {}", e))?;
         }
         Ok(())
@@ -112,8 +113,8 @@ impl ClientSchemeRuntime {
     /// Lifecycle hook: calls Scheme `(client-render dt)` if defined.
     pub fn render(&mut self, dt: f32) -> Result<(), String> {
         if self.has_client_render {
-            self.app
-                .safe_call_function("client-render", vec![SteelVal::NumV(dt as f64)], 500_000)
+            self.engine
+                .call_function_by_name_with_args("client-render", vec![SteelVal::NumV(dt as f64)])
                 .map_err(|e| format!("client-render failed: {}", e))?;
         }
         Ok(())
@@ -128,20 +129,18 @@ impl ClientSchemeRuntime {
         let payload_val = json_to_steel_val(payload);
 
         let handled = self
-            .app
-            .safe_call_function(
+            .engine
+            .call_function_by_name_with_args(
                 "%dispatch-server-event",
                 vec![name_val.clone(), payload_val.clone()],
-                100_000,
             )
             .map(|v| v.is_truthy())
             .unwrap_or(false);
 
-        if !handled && self.app.engine().global_exists("handle-server-event") {
-            let _ = self.app.safe_call_function(
+        if !handled && self.engine.global_exists("handle-server-event") {
+            let _ = self.engine.call_function_by_name_with_args(
                 "handle-server-event",
                 vec![name_val, payload_val],
-                100_000,
             );
         }
     }
@@ -169,26 +168,35 @@ impl ClientSchemeRuntime {
 
     /// Executes arbitrary Scheme source code in the runtime environment.
     pub fn eval(&mut self, expr: &str) -> Result<Vec<SteelVal>, String> {
-        let res = self.app.run(expr).map_err(|e| e.to_string())?;
+        let res = self.engine.run(expr.to_string()).map_err(|e| e.to_string())?;
         self.refresh_lifecycle_hooks();
         Ok(res)
     }
 
     /// Evaluates a Scheme expression in REPL mode, returning formatted string output.
     pub fn eval_repl(&mut self, expr: &str) -> Result<String, String> {
-        let res = self.app.eval_repl(expr).map_err(|e| e.to_string())?;
+        let vals = self.engine.run(expr.to_string()).map_err(|e| e.to_string())?;
         self.refresh_lifecycle_hooks();
-        Ok(res)
+        if vals.is_empty() {
+            Ok("=> ()".to_string())
+        } else {
+            let out = vals
+                .iter()
+                .map(|v| format!("{}", v))
+                .collect::<Vec<_>>()
+                .join(" ");
+            Ok(format!("=> {}", out))
+        }
     }
 
-    /// Accesses the underlying `ScriptApp`.
-    pub fn app(&self) -> &ScriptApp {
-        &self.app
+    /// Accesses the underlying Steel Scheme engine.
+    pub fn engine(&self) -> &Engine {
+        &self.engine
     }
 
-    /// Mutably accesses the underlying `ScriptApp`.
-    pub fn app_mut(&mut self) -> &mut ScriptApp {
-        &mut self.app
+    /// Mutably accesses the underlying Steel Scheme engine.
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
     }
 
     /// Returns a reference to the loaded Virtual File System.
@@ -233,7 +241,7 @@ impl ClientSchemeRuntime {
 
     /// Refreshes whether lifecycle functions (`client-init`, `client-render`) are defined.
     fn refresh_lifecycle_hooks(&mut self) {
-        self.has_client_init = self.app.engine().global_exists("client-init");
-        self.has_client_render = self.app.engine().global_exists("client-render");
+        self.has_client_init = self.engine.global_exists("client-init");
+        self.has_client_render = self.engine.global_exists("client-render");
     }
 }
