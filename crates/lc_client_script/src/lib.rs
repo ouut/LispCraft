@@ -384,4 +384,92 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_tank_battle_2d_and_games_client_render() {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest_dir.join("../../games");
+
+        let games = ["tank_battle_2d", "space_arena", "dungeon"];
+
+        for game in games {
+            let game_dir = root.join(game).join("client");
+            if !game_dir.exists() {
+                continue;
+            }
+
+            let mut runtime = ClientSchemeRuntime::new().expect("Failed to create runtime");
+            runtime
+                .load_directory(&game_dir)
+                .unwrap_or_else(|e| panic!("Failed to load client scripts for {}: {}", game, e));
+
+            runtime
+                .init()
+                .unwrap_or_else(|e| panic!("client-init failed for {}: {}", game, e));
+
+            // Set up a realistic replicated state
+            let mut props = HashMap::new();
+            props.insert("kills".to_string(), json!(5));
+            props.insert("wave".to_string(), json!(2));
+            props.insert("turret_yaw".to_string(), json!(1.57));
+
+            let state = ClientState {
+                client_id: "player-alpha".to_string(),
+                camera_target: [10.5, 0.5, -4.2],
+                camera_yaw: 0.785,
+                hp: 75.0,
+                max_hp: 100.0,
+                score: 350,
+                entities: vec![
+                    EntityDesc {
+                        id: "player-beta".to_string(),
+                        shape: "tank".to_string(),
+                        pos: [5.0, 0.5, 5.0],
+                        size: [1.5, 1.0, 1.5],
+                        color: [0.9, 0.2, 0.2, 1.0],
+                        label: "Tank Beta".to_string(),
+                    },
+                    EntityDesc {
+                        id: "drone-1".to_string(),
+                        shape: "drone-scout".to_string(),
+                        pos: [-8.0, 0.5, 3.0],
+                        size: [1.0, 1.0, 1.0],
+                        color: [1.0, 0.5, 0.0, 1.0],
+                        label: "Scout Drone".to_string(),
+                    },
+                    EntityDesc {
+                        id: "pickup-repair-1".to_string(),
+                        shape: "pickup".to_string(),
+                        pos: [0.0, 0.5, 0.0],
+                        size: [0.8, 0.8, 0.8],
+                        color: [0.2, 1.0, 0.5, 1.0],
+                        label: "Nanite Repair".to_string(),
+                    },
+                    EntityDesc {
+                        id: "bullet-1".to_string(),
+                        shape: "bullet".to_string(),
+                        pos: [2.0, 0.5, 2.0],
+                        size: [0.3, 0.3, 0.3],
+                        color: [0.3, 0.9, 1.0, 1.0],
+                        label: "".to_string(),
+                    },
+                ],
+                logs: vec!["Game initialized".to_string()],
+                properties: props,
+            };
+
+            runtime.set_replicated_state(state);
+
+            // Execute render loop multiple frames
+            let (res, cmds) = lc_render::capture_render_commands(|| {
+                runtime.render(0.016)
+            });
+            res.unwrap_or_else(|e| panic!("client-render failed for {}: {}", game, e));
+            assert!(
+                !cmds.is_empty(),
+                "Expected non-empty render commands for {}",
+                game
+            );
+        }
+    }
 }

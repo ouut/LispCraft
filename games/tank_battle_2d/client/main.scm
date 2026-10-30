@@ -36,12 +36,27 @@
     ((string? val) val)
     (else "")))
 
+;; 安全获取关联列表 (alist) 中的值，带有默认回退
+(define (assoc-get key alist default-val)
+  (if (list? alist)
+      (let ((cell (assoc key alist)))
+        (if (and cell (pair? cell))
+            (cdr cell)
+            default-val))
+      default-val))
+
 ;; 世界坐标 (wx, wz) 投影为 2D 屏幕坐标 (sx, sy)
 (define (world->screen wx wz px pz cx cy scale)
   (let ((dx (- wx px))
         (dz (- wz pz)))
     (list (+ cx (* dx scale))
           (+ cy (* dz scale)))))
+
+;; 安全浮点数取模 (求余)
+(define (fmod a b)
+  (if (= b 0.0)
+      0.0
+      (- a (* (floor (/ a b)) b))))
 
 ;; --------------------------------------------------------
 ;; 2. 2D 街机风格网格背景与边界屏障渲染
@@ -52,8 +67,8 @@
 
   ;; 2.2 随玩家位置平滑滚动的 2D 赛博网格线
   (let* ((grid-step (* 4.0 scale)) ;; 每 4 米一条主网格线
-         (offset-x (modulo (- (* px scale)) grid-step))
-         (offset-y (modulo (- (* pz scale)) grid-step)))
+         (offset-x (fmod (- (* px scale)) grid-step))
+         (offset-y (fmod (- (* pz scale)) grid-step)))
 
     ;; 垂直网格线
     (let loop-x ((gx (- offset-x grid-step)))
@@ -190,9 +205,9 @@
 ;; 4. 敌方战术无人机与巡逻重坦 2D 绘制
 ;; --------------------------------------------------------
 (define (draw-enemy-drone ent px pz cx cy scale)
-  (let* ((pos (cdr (assoc "pos" ent)))
-         (shape (cdr (assoc "shape" ent)))
-         (label (cdr (assoc "label" ent)))
+  (let* ((pos (assoc-get "pos" ent '(0.0 0.0 0.0)))
+         (shape (assoc-get "shape" ent "drone"))
+         (label (assoc-get "label" ent ""))
          (wx (list-ref pos 0))
          (wz (list-ref pos 2))
          (s-pos (world->screen wx wz px pz cx cy scale))
@@ -244,9 +259,9 @@
 ;; 5. 战场战术道具球 2D 悬浮动画渲染
 ;; --------------------------------------------------------
 (define (draw-pickup-item ent px pz cx cy scale)
-  (let* ((id (cdr (assoc "id" ent)))
-         (pos (cdr (assoc "pos" ent)))
-         (label (cdr (assoc "label" ent)))
+  (let* ((id (assoc-get "id" ent ""))
+         (pos (assoc-get "pos" ent '(0.0 0.0 0.0)))
+         (label (assoc-get "label" ent ""))
          (wx (list-ref pos 0))
          (wz (list-ref pos 2))
          (s-pos (world->screen wx wz px pz cx cy scale))
@@ -293,10 +308,10 @@
 ;; 6. 战场掩体堡垒与电浆炮弹渲染
 ;; --------------------------------------------------------
 (define (draw-obstacle-bunker ent px pz cx cy scale)
-  (let* ((pos (cdr (assoc "pos" ent)))
-         (size (cdr (assoc "size" ent)))
-         (label (cdr (assoc "label" ent)))
-         (color (cdr (assoc "color" ent)))
+  (let* ((pos (assoc-get "pos" ent '(0.0 0.0 0.0)))
+         (size (assoc-get "size" ent '(2.0 2.0 2.0)))
+         (label (assoc-get "label" ent ""))
+         (color (assoc-get "color" ent '(0.4 0.45 0.5 1.0)))
          (wx (list-ref pos 0))
          (wz (list-ref pos 2))
          (sw-w (* (list-ref size 0) scale))
@@ -318,7 +333,7 @@
         #f)))
 
 (define (draw-plasma-bullet ent px pz cx cy scale)
-  (let* ((pos (cdr (assoc "pos" ent)))
+  (let* ((pos (assoc-get "pos" ent '(0.0 0.0 0.0)))
          (wx (list-ref pos 0))
          (wz (list-ref pos 2))
          (s-pos (world->screen wx wz px pz cx cy scale))
@@ -332,9 +347,9 @@
 ;; 7. 2D 街机 HUD 战斗仪表盘与战术雷达
 ;; --------------------------------------------------------
 (define (draw-cyber-hud player-data sw sh px pz)
-  (let* ((hp (cdr (assoc "hp" player-data)))
-         (max-hp (cdr (assoc "max_hp" player-data)))
-         (score (cdr (assoc "score" player-data)))
+  (let* ((hp (assoc-get "hp" player-data 100.0))
+         (max-hp (assoc-get "max_hp" player-data 100.0))
+         (score (assoc-get "score" player-data 0))
          (cx (/ sw 2.0))
          (cy (/ sh 2.0)))
 
@@ -415,14 +430,10 @@
          ;; 自适应缩放系数：根据屏幕高宽计算最优比例
          (scale (max 18.0 (min 30.0 (* (/ sh 600.0) 24.0))))
          (me (get-local-player))
-         (pos (if (and (list? me) (assoc "pos" me))
-                  (cdr (assoc "pos" me))
-                  '(0.0 0.5 0.0)))
+         (pos (assoc-get "pos" me '(0.0 0.5 0.0)))
          (px (list-ref pos 0))
          (pz (list-ref pos 2))
-         (yaw (if (and (list? me) (assoc "yaw" me))
-                  (cdr (assoc "yaw" me))
-                  0.0)))
+         (yaw (assoc-get "yaw" me 0.0)))
 
     ;; 8.2 保持 3D 摄像机为自顶向下俯视 (Pitch = 1.55 弧度近 90 度垂直俯视)
     (set-camera! (list px 22.0 pz) 0.0 1.55 22.0)
@@ -435,14 +446,14 @@
       (if (list? entities)
           (for-each
             (lambda (ent)
-              (let ((id (cdr (assoc "id" ent)))
-                    (shape (cdr (assoc "shape" ent))))
+              (let ((id (assoc-get "id" ent ""))
+                    (shape (assoc-get "shape" ent "")))
                 (cond
                   ;; 其他在线玩家战车 (player- 前缀)
                   ((string-starts-with? id "player-")
-                   (let* ((epos (cdr (assoc "pos" ent)))
-                          (ecol (cdr (assoc "color" ent)))
-                          (elabel (cdr (assoc "label" ent)))
+                   (let* ((epos (assoc-get "pos" ent '(0.0 0.0 0.0)))
+                          (ecol (assoc-get "color" ent '(0.8 0.2 0.2 1.0)))
+                          (elabel (assoc-get "label" ent "TANK"))
                           (ex (list-ref epos 0))
                           (ez (list-ref epos 2))
                           (s-pt (world->screen ex ez px pz cx cy scale)))
@@ -468,8 +479,8 @@
 
     ;; 8.5 绘制本地玩家战车 (居中显示在 (cx, cy))
     (if (and (list? me) (assoc "pos" me))
-        (let ((hp (cdr (assoc "hp" me)))
-              (max-hp (cdr (assoc "max_hp" me))))
+        (let ((hp (assoc-get "hp" me 100.0))
+              (max-hp (assoc-get "max_hp" me 100.0)))
           (draw-tank-sprite cx cy yaw '(0.2 0.9 0.5 1.0) #t hp max-hp "COMMANDER"))
         #f)
 

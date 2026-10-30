@@ -43,7 +43,8 @@ pub const SCHEME_PRELUDE: &str = r#"
         (let ((pos (list-ref p 0))
               (yaw (list-ref p 1))
               (hp (list-ref p 2))
-              (score (list-ref p 3)))
+              (score (list-ref p 3))
+              (max-hp (if (> (length p) 4) (list-ref p 4) 100.0)))
           (list (cons "pos" pos)
                 (cons 'pos pos)
                 (cons "yaw" yaw)
@@ -51,7 +52,9 @@ pub const SCHEME_PRELUDE: &str = r#"
                 (cons "hp" hp)
                 (cons 'hp hp)
                 (cons "score" score)
-                (cons 'score score)))
+                (cons 'score score)
+                (cons "max_hp" max-hp)
+                (cons 'max_hp max-hp)))
         '())))
 
 ;; --- RemoteEvent Callback Registry ---
@@ -458,6 +461,7 @@ pub fn register_bindings(
                     SteelVal::NumV(state.camera_yaw as f64),
                     SteelVal::NumV(state.hp as f64),
                     SteelVal::IntV(state.score as isize),
+                    SteelVal::NumV(state.max_hp as f64),
                 ]
                 .into(),
             )
