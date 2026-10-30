@@ -1,9 +1,9 @@
 //! # Native Drawing & State Bindings for Steel Scheme VM
 
 use std::sync::{Arc, Mutex};
-use game_script::SteelVal;
 use lc_core::ClientState;
 use lc_render::OrbitCamera;
+use steel::rvals::SteelVal;
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
 

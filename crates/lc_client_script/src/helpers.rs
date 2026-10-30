@@ -1,9 +1,109 @@
 //! # Helper parsers and converters for SteelVal and Macroquad / lc_render types
 
-use game_script::{json_to_steel_val, steel_val_to_json, SteelVal};
 use lc_core::EntityDesc;
 use macroquad::color::Color;
 use macroquad::math::{vec2, vec3, Vec2, Vec3};
+use serde_json::{Map, Number, Value};
+use steel::gc::Gc;
+use steel::rvals::SteelVal;
+use steel::HashMap;
+
+/// Convert a Scheme [`SteelVal`] reference to a [`serde_json::Value`].
+pub fn steel_val_to_json(val: &SteelVal) -> Result<Value, String> {
+    match val {
+        SteelVal::BoolV(b) => Ok(Value::Bool(*b)),
+        SteelVal::NumV(n) => {
+            Number::from_f64(*n)
+                .map(Value::Number)
+                .ok_or_else(|| format!("Non-finite f64: {}", n))
+        }
+        SteelVal::IntV(i) => Ok(Value::Number((*i as i64).into())),
+        SteelVal::Rational(r) => {
+            let f = (*r.numer() as f64) / (*r.denom() as f64);
+            Number::from_f64(f)
+                .map(Value::Number)
+                .ok_or_else(|| format!("Rational to f64 failed: {}", r))
+        }
+        SteelVal::BigNum(bn) => {
+            let s = bn.to_string();
+            if let Ok(num) = s.parse::<serde_json::Number>() {
+                Ok(Value::Number(num))
+            } else {
+                Ok(Value::String(s))
+            }
+        }
+        SteelVal::StringV(s) => Ok(Value::String(s.to_string())),
+        SteelVal::SymbolV(s) => Ok(Value::String(s.to_string())),
+        SteelVal::CharV(c) => Ok(Value::String(c.to_string())),
+        SteelVal::Void => Ok(Value::Null),
+        SteelVal::ListV(l) => {
+            let mut arr = Vec::with_capacity(l.len());
+            for item in l {
+                arr.push(steel_val_to_json(item)?);
+            }
+            Ok(Value::Array(arr))
+        }
+        SteelVal::VectorV(v) => {
+            let mut arr = Vec::with_capacity(v.len());
+            for item in v.iter() {
+                arr.push(steel_val_to_json(item)?);
+            }
+            Ok(Value::Array(arr))
+        }
+        SteelVal::HashMapV(hm) => {
+            let mut map = Map::new();
+            for (k, v) in hm.iter() {
+                let key = match k {
+                    SteelVal::StringV(s) => s.to_string(),
+                    SteelVal::SymbolV(s) => s.to_string(),
+                    SteelVal::IntV(i) => i.to_string(),
+                    other => format!("{}", other),
+                };
+                map.insert(key, steel_val_to_json(v)?);
+            }
+            Ok(Value::Object(map))
+        }
+        SteelVal::HashSetV(hs) => {
+            let mut arr = Vec::with_capacity(hs.len());
+            for item in hs.iter() {
+                arr.push(steel_val_to_json(item)?);
+            }
+            Ok(Value::Array(arr))
+        }
+        other => Err(format!("Unsupported SteelVal type for JSON: {:?}", other)),
+    }
+}
+
+/// Convert a [`serde_json::Value`] reference to a Scheme [`SteelVal`].
+pub fn json_to_steel_val(val: &Value) -> SteelVal {
+    match val {
+        Value::Null => SteelVal::Void,
+        Value::Bool(b) => SteelVal::BoolV(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                SteelVal::IntV(i as isize)
+            } else if let Some(u) = n.as_u64() {
+                SteelVal::IntV(u as isize)
+            } else if let Some(f) = n.as_f64() {
+                SteelVal::NumV(f)
+            } else {
+                SteelVal::Void
+            }
+        }
+        Value::String(s) => SteelVal::StringV(s.as_str().into()),
+        Value::Array(arr) => {
+            let items: Vec<SteelVal> = arr.iter().map(json_to_steel_val).collect();
+            SteelVal::ListV(items.into())
+        }
+        Value::Object(obj) => {
+            let mut map = HashMap::new();
+            for (k, v) in obj {
+                map.insert(SteelVal::StringV(k.as_str().into()), json_to_steel_val(v));
+            }
+            SteelVal::HashMapV(Gc::new(map).into())
+        }
+    }
+}
 
 /// Safely parses an `f32` from a `SteelVal` (accepts floats and integers).
 pub fn parse_f32(val: &SteelVal) -> Result<f32, String> {

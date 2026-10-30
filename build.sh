@@ -212,7 +212,7 @@ fi
 # ------------------------------------------------------------------------------
 if [[ "${SKIP_WASM}" == "false" ]]; then
     log_step "4. Building WebAssembly Client (target: wasm32-unknown-unknown)"
-    cargo build --release --target wasm32-unknown-unknown --bin client
+    cargo build --release --target wasm32-unknown-unknown --package lc_client --bin client
 
     WASM_SRC="target/wasm32-unknown-unknown/release/client.wasm"
     WASM_DST="web/client.wasm"

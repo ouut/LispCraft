@@ -23,6 +23,7 @@ mod tests {
     use lc_core::{ClientState, EntityDesc};
     use serde_json::json;
     use std::collections::HashMap;
+    use steel::rvals::SteelVal;
 
     #[test]
     fn test_vfs_sorting_order() {
@@ -72,19 +73,19 @@ mod tests {
 
         // Before init
         let init_val = runtime.eval("*initialized*").unwrap();
-        assert_eq!(init_val[0], game_script::SteelVal::BoolV(false));
+        assert_eq!(init_val[0], SteelVal::BoolV(false));
 
         // Call init
         runtime.init().expect("client-init failed");
         let init_after = runtime.eval("*initialized*").unwrap();
-        assert_eq!(init_after[0], game_script::SteelVal::BoolV(true));
+        assert_eq!(init_after[0], SteelVal::BoolV(true));
 
         // Call render twice
         runtime.render(0.016).expect("client-render failed");
         runtime.render(0.016).expect("client-render failed");
 
         let dt_val = runtime.eval("*total-dt*").unwrap();
-        if let game_script::SteelVal::NumV(dt) = dt_val[0] {
+        if let SteelVal::NumV(dt) = dt_val[0] {
             assert!((dt - 0.032).abs() < 1e-4);
         } else {
             panic!("Expected NumV for *total-dt*");
@@ -140,30 +141,30 @@ mod tests {
         let lp_hp = runtime
             .eval(r#"(cdr (assoc "hp" (get-local-player)))"#)
             .unwrap();
-        assert_eq!(lp_hp[0], game_script::SteelVal::NumV(85.0));
+        assert_eq!(lp_hp[0], SteelVal::NumV(85.0));
 
         let lp_score = runtime
             .eval(r#"(cdr (assoc "score" (get-local-player)))"#)
             .unwrap();
-        assert_eq!(lp_score[0], game_script::SteelVal::IntV(1250));
+        assert_eq!(lp_score[0], SteelVal::IntV(1250));
 
         // Test (get-replicated-entities)
         let ent_count = runtime
             .eval(r#"(length (get-replicated-entities))"#)
             .unwrap();
-        assert_eq!(ent_count[0], game_script::SteelVal::IntV(2));
+        assert_eq!(ent_count[0], SteelVal::IntV(2));
 
         let ent0_id = runtime
             .eval(r#"(cdr (assoc "id" (car (get-replicated-entities))))"#)
             .unwrap();
-        assert_eq!(ent0_id[0], game_script::SteelVal::StringV("cube_1".into()));
+        assert_eq!(ent0_id[0], SteelVal::StringV("cube_1".into()));
 
         let ent0_shape = runtime
             .eval(r#"(cdr (assoc "shape" (car (get-replicated-entities))))"#)
             .unwrap();
         assert_eq!(
             ent0_shape[0],
-            game_script::SteelVal::StringV("cube".into())
+            SteelVal::StringV("cube".into())
         );
 
         let ent0_pos = runtime
@@ -176,7 +177,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             ent0_label[0],
-            game_script::SteelVal::StringV("Target Alpha".into())
+            SteelVal::StringV("Target Alpha".into())
         );
     }
 
@@ -248,7 +249,7 @@ mod tests {
         assert!((dist - 14.0).abs() < 1e-4);
 
         let query = runtime.eval("(get-camera)").unwrap();
-        assert!(matches!(query[0], game_script::SteelVal::ListV(_)));
+        assert!(matches!(query[0], SteelVal::ListV(_)));
     }
 
     #[test]
@@ -336,15 +337,15 @@ mod tests {
         let mut runtime = ClientSchemeRuntime::new().expect("Failed to create runtime");
 
         let sw = runtime.eval("(screen-width)").unwrap();
-        assert!(matches!(sw[0], game_script::SteelVal::NumV(_)));
+        assert!(matches!(sw[0], SteelVal::NumV(_)));
 
         let sh = runtime.eval("(screen-height)").unwrap();
-        assert!(matches!(sh[0], game_script::SteelVal::NumV(_)));
+        assert!(matches!(sh[0], SteelVal::NumV(_)));
 
         let mw = runtime
             .eval(r#"(measure-text-width "HELLO" 14)"#)
             .unwrap();
-        if let game_script::SteelVal::NumV(w) = mw[0] {
+        if let SteelVal::NumV(w) = mw[0] {
             assert!(w > 0.0);
         } else {
             panic!("Expected NumV for measure-text-width");
@@ -352,7 +353,7 @@ mod tests {
 
         // Test world-to-screen (origin in front of camera should project)
         let w2s = runtime.eval("(world-to-screen (list 0 0 0))").unwrap();
-        assert!(matches!(w2s[0], game_script::SteelVal::ListV(_)));
+        assert!(matches!(w2s[0], SteelVal::ListV(_)));
     }
 
     #[test]
@@ -379,7 +380,7 @@ mod tests {
 
         assert_eq!(runtime.vfs().len(), 2);
         let res = runtime.eval("TEST_CONST").unwrap();
-        assert_eq!(res[0], game_script::SteelVal::NumV(999.0));
+        assert_eq!(res[0], SteelVal::NumV(999.0));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

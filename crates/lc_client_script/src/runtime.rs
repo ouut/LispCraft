@@ -10,12 +10,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use game_script::{json_to_steel_val, SteelVal};
 use lc_core::ClientState;
 use lc_render::OrbitCamera;
+use steel::rvals::SteelVal;
 use steel::steel_vm::engine::Engine;
 
 use crate::bindings::register_bindings;
+use crate::helpers::json_to_steel_val;
 use crate::vfs::{scan_directory, sort_vfs_entries};
 
 /// Client-side Scheme scripting and execution runtime.

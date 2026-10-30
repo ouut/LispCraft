@@ -8,7 +8,6 @@ description = "Client-side Scheme scripting VM with native Macroquad GPU renderi
 lc_core = { workspace = true }
 lc_render = { workspace = true }
 game_net = { workspace = true }
-game_script = { workspace = true }
 steel-core = { workspace = true }
 macroquad = { workspace = true }
 serde = { workspace = true }
