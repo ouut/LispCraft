@@ -305,14 +305,33 @@ pub fn resolve_server_address(args: &[String], default_port: &str) -> String {
     resolve_online_params(args, default_port).server_addr
 }
 
+#[cfg(target_arch = "wasm32")]
+mod wasm_shims {
+    extern "C" {
+        pub fn lispcraft_get_url_pathname(ptr: *mut u8, max_len: usize) -> usize;
+        pub fn lispcraft_get_random(ptr: *mut u8, len: usize);
+    }
+
+    fn custom_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
+        unsafe {
+            lispcraft_get_random(buf.as_mut_ptr(), buf.len());
+        }
+        Ok(())
+    }
+
+    getrandom::register_custom_getrandom!(custom_getrandom);
+}
+
 /// Resolves WASM host configuration with dynamic URL pathname extraction.
 #[cfg(target_arch = "wasm32")]
 pub fn resolve_wasm_online_params(default_port: &str) -> OnlineParams {
     let mut game_id = "space_arena".to_string();
     let mut token = format!("guest_{}", (safe_get_time() * 1000.0) as u64);
 
-    if let Ok(eval_res) = js_sys::eval("window.location ? window.location.pathname : ''") {
-        if let Some(pathname) = eval_res.as_string() {
+    let mut buf = [0u8; 512];
+    let len = unsafe { wasm_shims::lispcraft_get_url_pathname(buf.as_mut_ptr(), buf.len()) };
+    if len > 0 {
+        if let Ok(pathname) = std::str::from_utf8(&buf[..len]) {
             let parts: Vec<&str> = pathname.split('/').filter(|s| !s.is_empty()).collect();
             if let Some(first) = parts.first() {
                 if *first != "ws"

@@ -1459,7 +1459,49 @@ var importObject = {
             }
             animation_frame_timeout = window.requestAnimationFrame(animation);
         },
-        init_webgl
+        init_webgl,
+        lispcraft_get_url_pathname: function (ptr, max_len) {
+            var path = (typeof window !== "undefined" && window.location && window.location.pathname) ? window.location.pathname : "";
+            var bytes = new TextEncoder().encode(path);
+            var len = Math.min(bytes.length, max_len);
+            if (wasm_memory && wasm_memory.buffer) {
+                var dest = new Uint8Array(wasm_memory.buffer, ptr, len);
+                dest.set(bytes.subarray(0, len));
+            }
+            return len;
+        },
+        lispcraft_get_random: function (ptr, len) {
+            if (wasm_memory && wasm_memory.buffer) {
+                var view = new Uint8Array(wasm_memory.buffer, ptr, len);
+                if (typeof window !== "undefined" && window.crypto && window.crypto.getRandomValues) {
+                    window.crypto.getRandomValues(view);
+                } else {
+                    for (var j = 0; j < len; j++) {
+                        view[j] = Math.floor(Math.random() * 256);
+                    }
+                }
+            }
+        }
+    },
+    __wbindgen_placeholder__: {
+        __wbindgen_describe: function (v) { return 0; },
+        __wbindgen_object_drop_ref: function (v) { return 0; },
+        __wbg_getRandomValues_a608c4436c19407a: function (ptr, len) {
+            if (wasm_memory && wasm_memory.buffer) {
+                var view = new Uint8Array(wasm_memory.buffer, ptr, len);
+                if (typeof window !== "undefined" && window.crypto && window.crypto.getRandomValues) {
+                    window.crypto.getRandomValues(view);
+                } else {
+                    for (var j = 0; j < len; j++) {
+                        view[j] = Math.floor(Math.random() * 256);
+                    }
+                }
+            }
+        }
+    },
+    __wbindgen_externref_xform__: {
+        __wbindgen_externref_table_set_null: function (idx) { return 0; },
+        __wbindgen_externref_table_grow: function (delta) { return 0; }
     }
 };
 
@@ -1516,11 +1558,46 @@ function add_missing_functions_stabs(obj) {
     var imports = WebAssembly.Module.imports(obj);
 
     for (const i in imports) {
-        if (importObject["env"][imports[i].name] == undefined) {
-            console.warn("No " + imports[i].name + " function in gl.js");
-            importObject["env"][imports[i].name] = function () {
-                console.warn("Missed function: " + imports[i].name);
-            };
+        var mod = imports[i].module;
+        var name = imports[i].name;
+        if (!importObject[mod]) {
+            importObject[mod] = {};
+        }
+        if (importObject[mod][name] === undefined) {
+            if (name.indexOf("getRandomValues") !== -1) {
+                importObject[mod][name] = function (ptr, len) {
+                    try {
+                        if (wasm_memory && wasm_memory.buffer) {
+                            var view = new Uint8Array(wasm_memory.buffer, ptr, len);
+                            if (typeof window !== "undefined" && window.crypto && window.crypto.getRandomValues) {
+                                window.crypto.getRandomValues(view);
+                            } else {
+                                for (var j = 0; j < len; j++) {
+                                    view[j] = Math.floor(Math.random() * 256);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("getRandomValues fallback error:", e);
+                    }
+                };
+            } else if (name === "__wbindgen_externref_table_grow") {
+                importObject[mod][name] = function (delta) {
+                    return 0;
+                };
+            } else if (name === "__wbindgen_externref_table_set_null" ||
+                       name === "__wbindgen_object_drop_ref" ||
+                       name === "__wbindgen_describe") {
+                importObject[mod][name] = function (idx) {
+                    return 0;
+                };
+            } else {
+                console.warn("No " + name + " function in " + mod);
+                importObject[mod][name] = function () {
+                    console.warn("Missed function: " + mod + "." + name);
+                    return 0;
+                };
+            }
         }
     }
 }

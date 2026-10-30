@@ -20,5 +20,4 @@ serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
-js-sys = "0.3"
 sapp-jsutils = "0.1.7"

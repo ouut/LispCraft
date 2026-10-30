@@ -259,6 +259,7 @@ DIST_PATH="${OUTPUT_DIR}/${PACKAGE_NAME}"
 mkdir -p "${DIST_PATH}"
 
 if [[ "${SKIP_NATIVE}" == "false" ]]; then
+    rm -f "${DIST_PATH}/server${EXE_SUFFIX}" "${DIST_PATH}/client${EXE_SUFFIX}"
     cp "target/release/server${EXE_SUFFIX}" "${DIST_PATH}/"
     cp "target/release/client${EXE_SUFFIX}" "${DIST_PATH}/"
 fi
