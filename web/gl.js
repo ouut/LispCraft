@@ -1216,7 +1216,8 @@ var importObject = {
                 var btn = into_sapp_mousebutton(event.button);
                 wasm_exports.mouse_up(x, y, btn);
             };
-            canvas.onkeydown = function (event) {
+            var active_keys = new Set();
+            var on_key_down = function (event) {
                 var sapp_key_code = into_sapp_keycode(event.code);
                 switch (sapp_key_code) {
                     //  space, arrows - prevent scrolling of the page
@@ -1243,6 +1244,7 @@ var importObject = {
                 if (event.altKey) {
                     modifiers |= SAPP_MODIFIER_ALT;
                 }
+                active_keys.add(sapp_key_code);
                 wasm_exports.key_down(sapp_key_code, modifiers, event.repeat);
                 // for "space", "quote", and "slash" preventDefault will prevent
                 // key_press event, so send it here instead
@@ -1250,7 +1252,7 @@ var importObject = {
                     wasm_exports.key_press(sapp_key_code);
                 }
             };
-            canvas.onkeyup = function (event) {
+            var on_key_up = function (event) {
                 var sapp_key_code = into_sapp_keycode(event.code);
 
                 var modifiers = 0;
@@ -1264,8 +1266,35 @@ var importObject = {
                     modifiers |= SAPP_MODIFIER_ALT;
                 }
 
+                active_keys.delete(sapp_key_code);
                 wasm_exports.key_up(sapp_key_code, modifiers);
             };
+
+            var release_all_keys = function () {
+                for (var key_code of active_keys) {
+                    try {
+                        wasm_exports.key_up(key_code, 0);
+                    } catch (e) {}
+                }
+                active_keys.clear();
+            };
+
+            canvas.onkeydown = on_key_down;
+            canvas.onkeyup = on_key_up;
+            window.addEventListener("keyup", on_key_up);
+            window.addEventListener("blur", release_all_keys);
+            canvas.addEventListener("blur", release_all_keys);
+            document.addEventListener("visibilitychange", function () {
+                if (document.visibilityState !== "visible") {
+                    release_all_keys();
+                }
+            });
+
+            // Prevent context menu on canvas so right-click camera drag doesn't steal focus
+            canvas.addEventListener("contextmenu", function (event) {
+                event.preventDefault();
+                return false;
+            });
             canvas.onkeypress = function (event) {
                 var sapp_key_code = into_sapp_keycode(event.code);
 

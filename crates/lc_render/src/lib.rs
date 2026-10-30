@@ -396,6 +396,18 @@ mod tests {
     }
 
     #[test]
+    fn test_client_prediction_moving_tolerance() {
+        let mut pred = ClientPrediction::new(vec3(10.0, 0.0, 0.0));
+        // Small drift 0.2m when actively moving (dist < 0.35m tolerance) -> ignored without jitter
+        pred.reconcile_moving(vec3(9.8, 0.0, 0.0), true);
+        assert_eq!(pred.predicted_pos, vec3(10.0, 0.0, 0.0));
+
+        // Larger drift 1.0m when actively moving (dist >= 0.35m) -> smoothly reconciled
+        pred.reconcile_moving(vec3(9.0, 0.0, 0.0), true);
+        assert!((pred.predicted_pos.x - 9.8).abs() < 1e-4);
+    }
+
+    #[test]
     fn test_client_prediction_hard_snap_teleport() {
         let mut pred = ClientPrediction::new(vec3(10.0, 0.0, 0.0));
         // Server teleports to 50.0 (drift = 40.0 >= 5.0 -> hard snap)

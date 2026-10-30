@@ -499,6 +499,7 @@ async fn main() {
     let mut player_id_str = "player_local".to_string();
     let mut cam_initialized = false;
     let mut last_mouse_pos = vec2(0.0, 0.0);
+    let mut was_moving = false;
 
     add_log(
         &mut message_logs,
@@ -613,8 +614,11 @@ async fn main() {
                                         cam_initialized = true;
                                     }
                                     interpolation_buffer.push(get_time(), state.clone());
-                                    client_prediction.reconcile(target);
-                                    runtime.set_replicated_state(state.clone());
+                                    client_prediction.reconcile_moving(target, was_moving);
+                                    let mut synced_state = state.clone();
+                                    let cur_pos = client_prediction.pos();
+                                    synced_state.camera_target = [cur_pos.x, cur_pos.y, cur_pos.z];
+                                    runtime.set_replicated_state(synced_state);
 
                                     for log in &state.logs {
                                         if !known_server_logs.contains(log) {
@@ -719,8 +723,11 @@ async fn main() {
                                 cam_initialized = true;
                             }
                             interpolation_buffer.push(get_time(), state.clone());
-                            client_prediction.reconcile(target);
-                            runtime.set_replicated_state(state.clone());
+                            client_prediction.reconcile_moving(target, was_moving);
+                            let mut synced_state = state.clone();
+                            let cur_pos = client_prediction.pos();
+                            synced_state.camera_target = [cur_pos.x, cur_pos.y, cur_pos.z];
+                            runtime.set_replicated_state(synced_state);
                         }
                     }
                 } else if was_connected {
@@ -757,6 +764,7 @@ async fn main() {
         }
 
         // --- Input Handling ---
+        let mut just_exited_command_mode = false;
         if is_key_pressed(KeyCode::Enter) {
             if !command_mode {
                 command_mode = true;
@@ -766,6 +774,7 @@ async fn main() {
                 let trimmed = command_input.trim().to_string();
                 if trimmed.is_empty() {
                     command_mode = false;
+                    just_exited_command_mode = true;
                 } else {
                     if command_history.last() != Some(&trimmed) {
                         command_history.push(trimmed.clone());
@@ -806,6 +815,7 @@ async fn main() {
 
                     command_input.clear();
                     command_mode = false;
+                    just_exited_command_mode = true;
                 }
             }
         }
@@ -848,7 +858,7 @@ async fn main() {
             if is_key_pressed(KeyCode::Backspace) {
                 command_input.pop();
             }
-        } else {
+        } else if !just_exited_command_mode {
             // Camera orbit controls with arrow keys
             if is_key_down(KeyCode::Left) {
                 camera.target_camera_yaw -= 2.2 * dt;
@@ -883,20 +893,36 @@ async fn main() {
                 move_input += right;
             }
 
-            if move_input.length_squared() > 0.001 {
+            let is_moving = move_input.length_squared() > 0.001;
+            if is_moving {
                 let norm = move_input.normalize();
                 let input = LispMotionInput {
                     dx: norm.x,
                     dz: norm.y,
                     yaw: camera.camera_yaw,
                 };
-                let speed = 8.0_f32;
+                // Authoritative server simulation rate: 0.25 units/tick * 20 TPS = 5.0 m/s
+                let speed = 5.0_f32;
                 client_prediction.predict_move(&input, speed, dt);
                 if let Some(ref mut sock) = socket {
                     if was_connected {
                         sock.send_envelope(&ClientEnvelope::Input(input));
                     }
                 }
+                was_moving = true;
+            } else if was_moving {
+                // Send explicit zero-velocity stop packet once to immediately clear server-side motion latch
+                let stop_input = LispMotionInput {
+                    dx: 0.0,
+                    dz: 0.0,
+                    yaw: camera.camera_yaw,
+                };
+                if let Some(ref mut sock) = socket {
+                    if was_connected {
+                        sock.send_envelope(&ClientEnvelope::Input(stop_input));
+                    }
+                }
+                was_moving = false;
             }
 
             // Mouse orbit and zoom

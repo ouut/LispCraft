@@ -38,16 +38,30 @@ impl ClientPrediction {
 
     /// Reconciles local predicted position against authoritative server position.
     ///
-    /// - If drift $|\vec{E}| < 5.0\text{m}$: soft blends `predicted_pos += drift * 0.2` to eliminate jitter.
-    /// - If drift $|\vec{E}| \ge 5.0\text{m}$: hard snaps `predicted_pos = server_pos` (e.g. teleport, knockback, collision).
-    pub fn reconcile(&mut self, server_pos: Vec3) {
+    /// - `is_moving`: whether the client is currently actively applying motion input.
+    /// - When moving: ignores drift within network latency tolerance ($|\vec{E}| < 0.35\text{m}$)
+    ///   to eliminate visual stutter/rubber-banding caused by delayed server snapshots.
+    /// - When stationary: applies fine-grained soft reconciliation for drift $\ge 0.05\text{m}$.
+    /// - If drift $|\vec{E}| \ge 5.0\text{m}$: hard snaps `predicted_pos = server_pos` (e.g. teleport, knockback).
+    pub fn reconcile_moving(&mut self, server_pos: Vec3, is_moving: bool) {
         let drift = server_pos - self.predicted_pos;
         let dist = drift.length();
+
+        let tolerance = if is_moving { 0.35 } else { 0.05 };
+        if dist < tolerance {
+            return;
+        }
+
         if dist < 5.0 {
             self.predicted_pos += drift * 0.2;
         } else {
             self.predicted_pos = server_pos;
         }
+    }
+
+    /// Reconciles local predicted position against authoritative server position with default stationary tolerance.
+    pub fn reconcile(&mut self, server_pos: Vec3) {
+        self.reconcile_moving(server_pos, false);
     }
 
     /// Returns the current predicted position.
