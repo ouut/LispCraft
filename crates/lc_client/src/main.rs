@@ -132,7 +132,7 @@ pub enum HostMode {
 /// Supports:
 /// - `http://ip:port/:game_id/:token` or `http://ip:port/game_id/token`
 /// - `ws://ip:port/ws` or `ws://ip:port/:game_id/:token`
-/// - `127.0.0.1:8087` or `8087`
+/// - `127.0.0.1:8082` or `8082`
 pub fn parse_url_string(
     input: &str,
     default_port: &str,
@@ -395,11 +395,11 @@ async fn main() {
             std::env::var("PORT")
                 .or_else(|_| std::env::var("WS_PORT"))
                 .or_else(|_| std::env::var("HTTP_PORT"))
-                .unwrap_or_else(|_| "8087".to_string())
+                .unwrap_or_else(|_| "8082".to_string())
         }
         #[cfg(target_arch = "wasm32")]
         {
-            "8087".to_string()
+            "8082".to_string()
         }
     };
 
@@ -1143,32 +1143,32 @@ mod tests {
     fn test_parse_url_string() {
         // http url with :game_id/:token
         let (addr1, g1, t1) =
-            parse_url_string("http://192.168.1.100:8087/:space_arena/:token_xyz", "8087");
-        assert_eq!(addr1, "ws://192.168.1.100:8087/ws");
+            parse_url_string("http://192.168.1.100:8082/:space_arena/:token_xyz", "8082");
+        assert_eq!(addr1, "ws://192.168.1.100:8082/ws");
         assert_eq!(g1.as_deref(), Some("space_arena"));
         assert_eq!(t1.as_deref(), Some("token_xyz"));
 
         // http url without colons in path
         let (addr2, g2, t2) =
-            parse_url_string("http://localhost:8087/dungeon/hero_42", "8087");
-        assert_eq!(addr2, "ws://localhost:8087/ws");
+            parse_url_string("http://localhost:8082/dungeon/hero_42", "8082");
+        assert_eq!(addr2, "ws://localhost:8082/ws");
         assert_eq!(g2.as_deref(), Some("dungeon"));
         assert_eq!(t2.as_deref(), Some("hero_42"));
 
         // ws url with /ws
-        let (addr3, g3, t3) = parse_url_string("ws://127.0.0.1:8087/ws", "8087");
-        assert_eq!(addr3, "ws://127.0.0.1:8087/ws");
+        let (addr3, g3, t3) = parse_url_string("ws://127.0.0.1:8082/ws", "8082");
+        assert_eq!(addr3, "ws://127.0.0.1:8082/ws");
         assert_eq!(g3, None);
         assert_eq!(t3, None);
 
         // port only
-        let (addr4, g4, t4) = parse_url_string("9000", "8087");
+        let (addr4, g4, t4) = parse_url_string("9000", "8082");
         assert_eq!(addr4, "ws://127.0.0.1:9000/ws");
         assert_eq!(g4, None);
         assert_eq!(t4, None);
 
         // host:port
-        let (addr5, g5, t5) = parse_url_string("10.0.0.1:8090", "8087");
+        let (addr5, g5, t5) = parse_url_string("10.0.0.1:8090", "8082");
         assert_eq!(addr5, "ws://10.0.0.1:8090/ws");
         assert_eq!(g5, None);
         assert_eq!(t5, None);
@@ -1178,16 +1178,16 @@ mod tests {
     fn test_resolve_online_params() {
         let args = vec![
             "client".to_string(),
-            "http://127.0.0.1:8087/:space_arena/:commander_1".to_string(),
+            "http://127.0.0.1:8082/:space_arena/:commander_1".to_string(),
         ];
-        let params = resolve_online_params(&args, "8087");
-        assert_eq!(params.server_addr, "ws://127.0.0.1:8087/ws");
+        let params = resolve_online_params(&args, "8082");
+        assert_eq!(params.server_addr, "ws://127.0.0.1:8082/ws");
         assert_eq!(params.game_id, "space_arena");
         assert_eq!(params.token, "commander_1");
 
         let default_args = vec!["client".to_string()];
-        let default_params = resolve_online_params(&default_args, "8087");
-        assert_eq!(default_params.server_addr, "ws://127.0.0.1:8087/ws");
+        let default_params = resolve_online_params(&default_args, "8082");
+        assert_eq!(default_params.server_addr, "ws://127.0.0.1:8082/ws");
         assert_eq!(default_params.game_id, "space_arena");
         assert!(default_params.token.starts_with("guest_"));
     }
@@ -1202,7 +1202,7 @@ mod tests {
 
         let dir_str = temp_dir.to_str().unwrap().to_string();
         let args_dir = vec!["client".to_string(), dir_str.clone()];
-        let mode = resolve_host_mode(&args_dir, "8087");
+        let mode = resolve_host_mode(&args_dir, "8082");
         match mode {
             HostMode::OfflineHotReload { dir_path } => {
                 assert_eq!(dir_path, PathBuf::from(dir_str));
@@ -1212,7 +1212,7 @@ mod tests {
 
         // Mode A: Normal arguments
         let args_online = vec!["client".to_string(), "9000".to_string()];
-        let mode_online = resolve_host_mode(&args_online, "8087");
+        let mode_online = resolve_host_mode(&args_online, "8082");
         match mode_online {
             HostMode::Online(params) => {
                 assert_eq!(params.server_addr, "ws://127.0.0.1:9000/ws");

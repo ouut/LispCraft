@@ -48,7 +48,7 @@ pub fn parse_args(args: &[String]) -> Result<ServerArgs, String> {
             games_dir: "games".to_string(),
             script_path: "games/space_arena.scm".to_string(),
             default_game: None,
-            port: 8087,
+            port: 8082,
             show_help: true,
         });
     }
@@ -60,7 +60,7 @@ pub fn parse_args(args: &[String]) -> Result<ServerArgs, String> {
         .or_else(|_| std::env::var("HTTP_PORT"))
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(8087);
+        .unwrap_or(8082);
 
     let mut positional = Vec::new();
     let mut i = 1;
@@ -423,7 +423,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("  LispCraft 3D Industrial Gateway Server (v0.2.0)");
         println!("====================================================");
         println!(
-            "Usage: {} [games_dir] [--port 8087] [OPTIONS]",
+            "Usage: {} [games_dir] [--port 8082] [OPTIONS]",
             args.first().map(|s| s.as_str()).unwrap_or("server")
         );
         println!();
@@ -431,7 +431,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("  [games_dir]                    Games directory or script (default: games)");
         println!();
         println!("Options:");
-        println!("  -p, --port, --ws-port <PORT>   Server port (default: 8087, or PORT env)");
+        println!("  -p, --port, --ws-port <PORT>   Server port (default: 8082, or PORT env)");
         println!("  --port=<PORT>                  Server port assignment syntax");
         println!("  -h, --help                     Print help information");
         return Ok(());
@@ -765,7 +765,7 @@ mod tests {
         let parsed = parse_args(&args).unwrap();
         assert_eq!(parsed.games_dir, "games");
         assert_eq!(parsed.script_path, "games/space_arena.scm");
-        assert_eq!(parsed.port, 8087);
+        assert_eq!(parsed.port, 8082);
         assert!(!parsed.show_help);
     }
 
@@ -786,7 +786,7 @@ mod tests {
         let parsed = parse_args(&args).unwrap();
         assert_eq!(parsed.script_path, "games/dungeon.scm");
         assert_eq!(parsed.default_game, Some("dungeon".to_string()));
-        assert_eq!(parsed.port, 8087);
+        assert_eq!(parsed.port, 8082);
 
         let args2 = vec![
             "server".to_string(),
@@ -805,13 +805,13 @@ mod tests {
         let args4 = vec!["server".to_string(), "games".to_string()];
         let parsed4 = parse_args(&args4).unwrap();
         assert_eq!(parsed4.games_dir, "games");
-        assert_eq!(parsed4.port, 8087);
+        assert_eq!(parsed4.port, 8082);
 
         let args5 = vec!["server".to_string(), "games/space_arena".to_string()];
         let parsed5 = parse_args(&args5).unwrap();
         assert_eq!(parsed5.games_dir, "games");
         assert_eq!(parsed5.default_game, Some("space_arena".to_string()));
-        assert_eq!(parsed5.port, 8087);
+        assert_eq!(parsed5.port, 8082);
     }
 
     #[test]
@@ -836,12 +836,12 @@ mod tests {
 
         let args3 = vec![
             "server".to_string(),
-            "--port=8087".to_string(),
+            "--port=8082".to_string(),
             "games/space_arena.scm".to_string(),
         ];
         let parsed3 = parse_args(&args3).unwrap();
         assert_eq!(parsed3.script_path, "games/space_arena.scm");
-        assert_eq!(parsed3.port, 8087);
+        assert_eq!(parsed3.port, 8082);
 
         let args4 = vec![
             "server".to_string(),
@@ -888,7 +888,7 @@ mod tests {
         let web_dir = find_web_dir();
         let app_state = Arc::new(AppState {
             web_dir,
-            internal_ws_url: "ws://127.0.0.1:8087/ws".to_string(),
+            internal_ws_url: "ws://127.0.0.1:8082/ws".to_string(),
         });
         let app = build_router(app_state);
 

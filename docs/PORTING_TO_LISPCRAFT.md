@@ -103,7 +103,7 @@ use shared::ClientState;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let script_path = std::env::args().nth(1).unwrap_or_else(|| "games/space_arena.scm".to_string());
-    let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "8087".to_string()).parse().unwrap_or(8087);
+    let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "8082".to_string()).parse().unwrap_or(8082);
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
     let web_dir = find_web_dir();
 
@@ -197,4 +197,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 1. **自动握手**：客户端连入 WebSocket 后立即发送 `ClientEnvelope::Auth { token, client_version }`，服务端自动注册会话并下发 `ServerEnvelope::AuthSuccess`。
 2. **双模解包**：客户端通过 `DualCodec` 解析下发的 `ServerEnvelope`，分别处理 `Snapshot`（3D 图元渲染）与 `Event`（命令行 Echo 回显）。
-3. **单端口 Web 访问**：浏览器打开 `http://localhost:8087/` 即可直接加载 WASM 并自动连入 `ws://localhost:8087/ws`，通过了全部 19 项端到端验收测试。
+3. **单端口 Web 访问**：浏览器打开 `http://localhost:8082/` 即可直接加载 WASM 并自动连入 `ws://localhost:8082/ws`，通过了全部 19 项端到端验收测试。

@@ -39,18 +39,18 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 git clone https://github.com/ouut/LispCraft.git
 cd LispCraft
 
-# 启动服务端 (自动挂载 games 目录并以太空竞技场模式为主，默认端口 8087)
+# 启动服务端 (自动挂载 games 目录并以太空竞技场模式为主，默认端口 8082)
 cargo run --release --bin server games/space_arena
 ```
 
 服务就绪后，在现代浏览器中打开一个或多个标签页访问：
-👉 **`http://localhost:8087/space_arena/guest_1`**
+👉 **`http://localhost:8082/space_arena/guest_1`**
 
 立即即可体验多玩家各自独立视角的 3D 联机环境！
 
 ### 2. 如何指定自定义端口 (Port Configuration)
 
-系统支持通过 **命令行位置参数**、**选项参数** 或 **环境变量** 自由指定网关监听端口（默认 8087）：
+系统支持通过 **命令行位置参数**、**选项参数** 或 **环境变量** 自由指定网关监听端口（默认 8082）：
 
 ```bash
 # 方式 A：位置参数
@@ -60,7 +60,7 @@ cargo run --release --bin server games/space_arena 8081
 cargo run --release --bin server games/space_arena --port 8081
 
 # 方式 C：环境变量 (PORT 或 HTTP_PORT)
-PORT=8087 cargo run --release --bin server games/space_arena
+PORT=8082 cargo run --release --bin server games/space_arena
 ```
 
 ### 3. 桌面原生客户端启动
@@ -69,7 +69,7 @@ PORT=8087 cargo run --release --bin server games/space_arena
 
 ```bash
 # 联机模式 (与浏览器 URL 行为 100% 同构，自动下载服务端 Scheme Bundle)
-cargo run --release --bin client http://localhost:8087/space_arena/guest_1
+cargo run --release --bin client http://localhost:8082/space_arena/guest_1
 
 # 或独立离线开发热更新模式 (实时监听本地 Scheme 脚本变化热重载，便于单机开发调试)
 cargo run --release --bin client games/space_arena
@@ -169,10 +169,10 @@ LispCraft/
 
 ```bash
 # 方式 A：标准 URL 参数 (与浏览器行为 100% 同构)
-cargo run --release --bin client http://127.0.0.1:8087/space_arena/guest_1
+cargo run --release --bin client http://127.0.0.1:8082/space_arena/guest_1
 
 # 方式 B：指定地牢模式
-cargo run --release --bin client http://127.0.0.1:8087/dungeon/hero_1
+cargo run --release --bin client http://127.0.0.1:8082/dungeon/hero_1
 
 # 方式 C：缺省默认启动 (自动连入 space_arena)
 cargo run --release --bin client

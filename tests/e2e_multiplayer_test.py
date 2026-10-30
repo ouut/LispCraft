@@ -3,7 +3,7 @@
 LispCraft 3D - 端到端多客户端并发仿真与集成验收测试套件 (E2E Integration & Verification Suite)
 
 测试范围:
-1. HTTP 静态 WebAssembly 交付验证 (Single-Port Gateway 8080)
+1. HTTP 静态 WebAssembly 交付验证 (Single-Port Gateway 8082)
    - / 根路径 HTML 与 CORS 响应
    - /client.wasm MIME 类型及 WASM 魔数 (\0asm)
    - 依赖脚本 (gl.js, quad-net.js, sapp_jsutils.js)
@@ -11,7 +11,7 @@ LispCraft 3D - 端到端多客户端并发仿真与集成验收测试套件 (E2E
 2. Layer 0 协议与心跳机制验证 (WebSocket /ws)
    - ClientEnvelope::Ping 与 ServerEnvelope::Pong
    - AuthHandshake 认证状态流转
-3. 多客户端并发仿真与视口独立性验证 (Not Shared Screen) (Single-Port 8080 /ws)
+3. 多客户端并发仿真与视口独立性验证 (Not Shared Screen) (Single-Port 8082 /ws)
    - Client A 与 Client B 同时连接
    - 各自独立下发 camera_target 与 client_id，互不干扰
 4. 空间裁剪与相互可见性验证 (Spatial Culling & Mutual Visibility)
@@ -45,7 +45,7 @@ import urllib.error
 import sys
 from typing import Optional, Tuple, List, Dict, Any, Callable
 
-SERVER_PORT = int(os.environ.get("PORT", os.environ.get("HTTP_PORT", "8087")))
+SERVER_PORT = int(os.environ.get("PORT", os.environ.get("HTTP_PORT", "8082")))
 
 # ============================================================================
 # 1. 轻量化原生 WebSocket 客户端 (基于 RFC 6455 规范)

@@ -18,7 +18,7 @@
 
 ### 1.3 浏览器优先与单服务多游戏动态挂载 (Multi-Game Dynamic Routing)
 - 服务端动态扫描 `games/` 目录，自动为每个子目录挂载独立的 Scheme 世界实例；
-- 浏览器打开 `http://ip:port/:game_id/:token`（例如 `http://localhost:8087/space_arena/guest_1`）即可直接加载进入对应游戏世界；
+- 浏览器打开 `http://ip:port/:game_id/:token`（例如 `http://localhost:8082/space_arena/guest_1`）即可直接加载进入对应游戏世界；
 - WebSocket 自动协商与路由绑定，实现单端口多游戏并发隔离运行。
 
 ### 1.4 本地客户端同构体验与离线热更新调试 (Parity & Standalone Hot-Reload)
