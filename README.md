@@ -28,6 +28,14 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 
 ---
 
+## 📚 开发者文档与指南
+
+- 🤖 **[面向 Agent 的 Scheme 游戏开发手册 (Agent-First Scheme Manual)](docs/AGENT_SCHEME_DEVELOPMENT_GUIDE.md)**：面向 AI Agent 与独立开发者的纯 Scheme 游戏开发完全指南。**阅读本篇无需了解任何 Rust 代码**，即可完整开发 3D 多人联机/单机游戏，内含双端生命周期契约、3D/2D GPU 绘图原子、双向 RemoteEvents 通信及《水晶猎人》从零开发完整实战代码。
+- 📖 **[传统游戏迁移至 LispCraft 指南 (Porting Guide)](docs/PORTING_TO_LISPCRAFT.md)**：将现有脚本世界移植至 LispCraft 架构的设计参考。
+- 📐 **[需求与架构依赖图 (Requirements DAG)](docs/REQUIREMENTS_DAG.md)**：LispCraft 工业级通用游戏架构、核心契约与验收测试标准。
+
+---
+
 ## 🎮 快速开始
 
 ### 1. 源码启动 (推荐)
