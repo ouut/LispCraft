@@ -40,51 +40,6 @@ pub use projection::{
     compute_camera_matrix, screen_size, world_to_screen, world_to_screen_with_size,
 };
 
-/// Deprecated compatibility stub for transitional builds. Visuals are now driven by Scheme scripts.
-#[deprecated(note = "Radar visuals are now driven by Scheme scripts")]
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct RadarRenderer {
-    pub radar_range: f32,
-}
-
-#[allow(deprecated)]
-impl RadarRenderer {
-    pub fn new() -> Self {
-        Self { radar_range: 35.0 }
-    }
-    pub fn with_range(radar_range: f32) -> Self {
-        Self { radar_range }
-    }
-    pub fn draw_radar(
-        &self,
-        _center: macroquad::math::Vec2,
-        _radius: f32,
-        _player_pos: macroquad::math::Vec3,
-        _player_yaw: f32,
-        _entities: &[lc_core::EntityDesc],
-    ) {
-    }
-}
-
-/// Deprecated compatibility stub for transitional builds. Scene rendering is now driven by Scheme scripts.
-#[deprecated(note = "Scene rendering is now driven by Scheme scripts")]
-#[derive(Debug, Default, Clone)]
-pub struct SceneRenderer;
-
-#[allow(deprecated)]
-impl SceneRenderer {
-    pub fn new() -> Self {
-        Self
-    }
-    pub fn draw_scene(
-        &self,
-        _camera: &macroquad::camera::Camera3D,
-        _entities: &[lc_core::EntityDesc],
-        _player_pos: macroquad::math::Vec3,
-    ) {
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

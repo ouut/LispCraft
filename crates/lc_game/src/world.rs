@@ -25,14 +25,15 @@ fn parse_payload(val: &SteelVal) -> serde_json::Value {
     }
 }
 
-/// Resolves a script path across multiple candidate directories.
+/// Resolves a script path across multiple candidate directories, supporting both direct files
+/// and modular game directories (e.g. `games/space_arena` or `games/space_arena.scm` -> `games/space_arena/server/main.scm`).
 pub fn resolve_script_path(path: &str) -> PathBuf {
     let p = Path::new(path);
-    if p.is_absolute() && p.exists() {
+    if p.is_absolute() && p.is_file() {
         return p.to_path_buf();
     }
 
-    let mut candidates = vec![
+    let mut raw_candidates = vec![
         PathBuf::from(path),
         PathBuf::from(format!("../{}", path)),
         PathBuf::from(format!("../../{}", path)),
@@ -41,14 +42,33 @@ pub fn resolve_script_path(path: &str) -> PathBuf {
 
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         let manifest_path = PathBuf::from(manifest_dir);
-        candidates.push(manifest_path.join(path));
-        candidates.push(manifest_path.join("../").join(path));
-        candidates.push(manifest_path.join("../../").join(path));
+        raw_candidates.push(manifest_path.join(path));
+        raw_candidates.push(manifest_path.join("../").join(path));
+        raw_candidates.push(manifest_path.join("../../").join(path));
     }
 
-    for c in &candidates {
-        if c.exists() && c.is_file() {
+    for c in &raw_candidates {
+        if c.is_file() {
             return c.clone();
+        }
+        if c.is_dir() {
+            let s1 = c.join("server/main.scm");
+            if s1.is_file() {
+                return s1;
+            }
+            let s2 = c.join("main.scm");
+            if s2.is_file() {
+                return s2;
+            }
+        }
+        // If path was given as "foo.scm", check directory "foo/server/main.scm"
+        if let Some(stem) = c.file_stem().and_then(|s| s.to_str()) {
+            if let Some(parent) = c.parent() {
+                let s = parent.join(stem).join("server/main.scm");
+                if s.is_file() {
+                    return s;
+                }
+            }
         }
     }
     PathBuf::from(path)

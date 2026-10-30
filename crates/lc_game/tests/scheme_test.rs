@@ -2,7 +2,7 @@ use lc_game::{GameManager, SchemeGame, VIEW_DISTANCE};
 
 #[test]
 fn test_space_arena_full_lifecycle() {
-    let game = SchemeGame::new("games/space_arena.scm")
+    let game = SchemeGame::new("games/space_arena")
         .expect("Failed to initialize space arena SchemeGame");
 
     // 1. Join two players
@@ -138,7 +138,7 @@ fn test_space_arena_full_lifecycle() {
 #[test]
 fn test_dungeon_full_lifecycle() {
     let game =
-        SchemeGame::new("games/dungeon.scm").expect("Failed to initialize dungeon SchemeGame");
+        SchemeGame::new("games/dungeon").expect("Failed to initialize dungeon SchemeGame");
 
     // 1. Join two dungeon adventurers
     game.on_join("hero_1");
@@ -234,7 +234,7 @@ fn test_dungeon_full_lifecycle() {
 
 #[test]
 fn test_movement_and_leave() {
-    let game = SchemeGame::new("games/space_arena.scm").unwrap();
+    let game = SchemeGame::new("games/space_arena").unwrap();
     game.on_join("mover_1");
 
     // Teleport to a known location
@@ -259,7 +259,7 @@ fn test_movement_and_leave() {
 
 #[test]
 fn test_raw_scheme_eval_and_watchdog() {
-    let game = SchemeGame::new("games/space_arena.scm").unwrap();
+    let game = SchemeGame::new("games/space_arena").unwrap();
 
     // 1. Raw Scheme evaluation via on_command
     let eval_res = game.on_command("nobody", "(+ 123 456)");
@@ -279,7 +279,7 @@ fn test_view_distance_constant() {
 
 #[test]
 fn test_remote_event_handling_and_emission() {
-    let game = SchemeGame::new("games/space_arena.scm").unwrap();
+    let game = SchemeGame::new("games/space_arena").unwrap();
 
     // Register a custom on-remote-event handler in the VM
     let register_script = r#"

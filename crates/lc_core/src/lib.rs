@@ -142,21 +142,6 @@ pub fn name_to_player_id(name: &str) -> Option<PlayerId> {
     }
 }
 
-// 兼容旧版消息类型 (用于平滑迁移)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ClientMsg {
-    Move { dx: f32, dz: f32, yaw: f32 },
-    Action { action_id: u8 },
-    Command(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ServerMsg {
-    Welcome { client_id: String },
-    SyncState(ClientState),
-    CommandEcho { success: bool, output: String },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

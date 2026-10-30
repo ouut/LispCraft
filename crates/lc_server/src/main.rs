@@ -106,7 +106,23 @@ pub fn parse_args(args: &[String]) -> Result<ServerArgs, String> {
             port = p;
         } else {
             let path = Path::new(first);
-            if first.ends_with(".scm") {
+            let resolved = lc_game::resolve_games_dir(first);
+            if resolved.is_dir() {
+                if resolved.join("server/main.scm").exists() || resolved.join("client").exists() {
+                    if let Some(parent) = path.parent().and_then(|p| p.to_str()) {
+                        if !parent.is_empty() {
+                            games_dir = parent.to_string();
+                        }
+                    }
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        default_game = Some(name.to_string());
+                        script_path = format!("{}/{}/server/main.scm", games_dir, name);
+                    }
+                } else {
+                    games_dir = first.clone();
+                    script_path = format!("{}/space_arena/server/main.scm", first.trim_end_matches('/'));
+                }
+            } else if first.ends_with(".scm") {
                 script_path = first.clone();
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     default_game = Some(stem.to_string());
@@ -118,7 +134,7 @@ pub fn parse_args(args: &[String]) -> Result<ServerArgs, String> {
                 }
             } else {
                 games_dir = first.clone();
-                script_path = format!("{}/space_arena.scm", first.trim_end_matches('/'));
+                script_path = format!("{}/space_arena/server/main.scm", first.trim_end_matches('/'));
             }
 
             if let Some(second) = positional.get(1) {
@@ -790,6 +806,12 @@ mod tests {
         let parsed4 = parse_args(&args4).unwrap();
         assert_eq!(parsed4.games_dir, "games");
         assert_eq!(parsed4.port, 8087);
+
+        let args5 = vec!["server".to_string(), "games/space_arena".to_string()];
+        let parsed5 = parse_args(&args5).unwrap();
+        assert_eq!(parsed5.games_dir, "games");
+        assert_eq!(parsed5.default_game, Some("space_arena".to_string()));
+        assert_eq!(parsed5.port, 8087);
     }
 
     #[test]

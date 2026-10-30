@@ -203,13 +203,13 @@ class WebSocketClient:
 # ============================================================================
 # 2. 服务端进程生命周期管理器
 # ============================================================================
-def start_game_server(script_path: str = "games/space_arena.scm", timeout: float = 6.0) -> subprocess.Popen:
+def start_game_server(script_path: str = "games/space_arena", timeout: float = 6.0) -> subprocess.Popen:
     subprocess.run(["pkill", "-9", "-x", "server"], check=False)
     time.sleep(0.5)
 
-    server_bin = "./target/release/server"
-    if not os.path.exists(server_bin):
-        server_bin = "./target/debug/server"
+    candidates = ["./target/release/server", "./target/debug/server"]
+    existing = [c for c in candidates if os.path.exists(c)]
+    server_bin = max(existing, key=os.path.getmtime) if existing else "./target/debug/server"
 
     env = os.environ.copy()
     env["PORT"] = str(SERVER_PORT)
@@ -590,8 +590,8 @@ def run_dungeon_mode_switching_test(collector: TestReportCollector):
 
     t0 = time.time()
     try:
-        print("[Mode Switch] Stopping current server and loading 'games/dungeon.scm'...")
-        dungeon_proc = start_game_server("games/dungeon.scm")
+        print("[Mode Switch] Stopping current server and loading 'games/dungeon'...")
+        dungeon_proc = start_game_server("games/dungeon")
 
         # 连接客户端测试地牢世界
         client = WebSocketClient()
@@ -628,9 +628,9 @@ def run_dungeon_mode_switching_test(collector: TestReportCollector):
     except Exception as e:
         collector.record("GameMode", "Dungeon Mode Initialization & Entities", False, str(e), (time.time()-t0)*1000)
     finally:
-        # 切回默认的 space_arena.scm
-        print("[Mode Switch] Restoring space_arena.scm game server...")
-        start_game_server("games/space_arena.scm")
+        # 切回默认的 space_arena
+        print("[Mode Switch] Restoring space_arena game server...")
+        start_game_server("games/space_arena")
 
 
 def run_performance_benchmarks(collector: TestReportCollector):
@@ -718,8 +718,8 @@ def main():
         s.connect(("127.0.0.1", SERVER_PORT))
         s.close()
     except Exception:
-        print("[Init] Starting server on space_arena.scm...")
-        start_game_server("games/space_arena.scm")
+        print("[Init] Starting server on space_arena...")
+        start_game_server("games/space_arena")
 
     collector = TestReportCollector()
 

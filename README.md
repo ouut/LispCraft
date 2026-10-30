@@ -14,8 +14,8 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 2. **个性化状态视口，非多人同屏 (Not Shared Screen)**：
    - 每个玩家拥有独立的本地第三人称摄像机与专属状态（生命值、坐标、积分、个人日志）。
    - **25m 空间距离裁剪**：Scheme 依据玩家坐标动态计算视口切片，仅下发视野范围内的实体；进入视野的其他玩家会动态投影为带有对应代号标签的 3D 化身，视距外自动隐去。
-3. **单实例多租户 Scheme 运行态 (Scheme-Authoritative World)**：
-   - 服务端启动时指定一个 `.scm` 脚本（如 `space_arena.scm` 或 `dungeon.scm`），全局初始化唯一一个 Scheme 虚拟机实例，所有在线玩家共享同一个游戏世界上下文。
+3. **Roblox 架构：单服务多游戏动态挂载 (Multi-Game Dynamic Mounting)**：
+   - 服务端动态扫描 `games/` 目录，多游戏独立沙箱隔离运行；支持指定游戏（如 `games/space_arena` 或 `games/dungeon`）作为默认世界，浏览器通过 `http://ip:port/:game_id/:token` 自由接入。
 4. **混合通信与字符串命令管道 (Dual Input Pipeline)**：
    - 客户端除了捕获键盘 WASD 和鼠标视角移动外，按 `Enter` 键即可唤起赛博命令行输入栏。
    - 用户输入的任意字符串（如 `heal`、`tp 10 10`、`say Hello`、`spawn cube tower`）原样传输至服务端，由 Scheme 解析执行并返回执行结果。
@@ -39,12 +39,12 @@ LispCraft 是一个服务端完全主导、客户端纯数据驱动的 3D 多人
 git clone https://github.com/ouut/LispCraft.git
 cd LispCraft
 
-# 启动服务端 (加载默认太空竞技场模式，默认端口 8087)
-cargo run --release --bin server games/space_arena.scm
+# 启动服务端 (自动挂载 games 目录并以太空竞技场模式为主，默认端口 8087)
+cargo run --release --bin server games/space_arena
 ```
 
 服务就绪后，在现代浏览器中打开一个或多个标签页访问：
-👉 **`http://localhost:8087`**
+👉 **`http://localhost:8087/space_arena/guest_1`**
 
 立即即可体验多玩家各自独立视角的 3D 联机环境！
 
@@ -54,37 +54,36 @@ cargo run --release --bin server games/space_arena.scm
 
 ```bash
 # 方式 A：位置参数
-cargo run --release --bin server games/space_arena.scm 8081
+cargo run --release --bin server games/space_arena 8081
 
 # 方式 B：CLI 参数 (-p 或 --port)
-cargo run --release --bin server games/space_arena.scm --port 8081
+cargo run --release --bin server games/space_arena --port 8081
 
 # 方式 C：环境变量 (PORT 或 HTTP_PORT)
-PORT=8087 cargo run --release --bin server games/space_arena.scm
+PORT=8087 cargo run --release --bin server games/space_arena
 ```
 
 ### 3. 桌面原生客户端启动
 
-服务端保持运行的前提下，可以在本地终端直接启动桌面原生窗口客户端（自动直连服务端默认端口 8087）：
+服务端保持运行的前提下，可以在本地终端直接启动桌面原生窗口客户端：
 
 ```bash
-# 直连默认端口 (8087)
-cargo run --release --bin client
+# 联机模式 (与浏览器 URL 行为 100% 同构，自动下载服务端 Scheme Bundle)
+cargo run --release --bin client http://localhost:8087/space_arena/guest_1
 
-# 或指定端口 / 远程地址
-cargo run --release --bin client 8081
-cargo run --release --bin client -- ws://127.0.0.1:8087/ws
+# 或独立离线开发热更新模式 (实时监听本地 Scheme 脚本变化热重载，便于单机开发调试)
+cargo run --release --bin client games/space_arena
 ```
 
 桌面客户端与网页端玩家完全互通同服竞技。
 
 ### 4. 一键切换游戏世界
 
-服务端可在启动时指定任意 Scheme 脚本，瞬间切换至不同的游戏规则与世界布局：
+服务端可在启动时指定任意 Scheme 游戏目录，瞬间切换至不同的游戏规则与世界布局：
 
 ```bash
 # 切换至暗黑地牢模式 (包含祭坛、远古石柱与常驻火把)
-cargo run --release --bin server games/dungeon.scm
+cargo run --release --bin server games/dungeon
 ```
 
 ---
